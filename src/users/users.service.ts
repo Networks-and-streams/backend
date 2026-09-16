@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
 import type { User } from '@/generated/prisma/client';
+import { SubscriptionStatus, SubscriptionPlan } from '@/generated/prisma/client';
 
 import { BCRYPT_SALT_ROUNDS } from '@/common/constants';
 import { PrismaService } from '@/core/prisma';
@@ -21,6 +22,16 @@ export class UsersService {
         },
       });
 
+      // Every account starts with an inactive subscription; activation is
+      // driven exclusively by the payment domain (backend-confirmed success).
+      await tx.subscription.create({
+        data: {
+          userId: user.id,
+          status: SubscriptionStatus.INACTIVE,
+          plan: SubscriptionPlan.FREE,
+        },
+      });
+
       this.logger.log(`User ${user.id} created with email ${email}`);
 
       return user;
@@ -37,6 +48,14 @@ export class UsersService {
       const user = await tx.user.create({
         data: {
           email: data.email,
+        },
+      });
+
+      await tx.subscription.create({
+        data: {
+          userId: user.id,
+          status: SubscriptionStatus.INACTIVE,
+          plan: SubscriptionPlan.FREE,
         },
       });
 

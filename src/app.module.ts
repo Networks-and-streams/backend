@@ -6,6 +6,8 @@ import { AppConfigModule } from './config/app-config.module';
 import { CoreModule } from './core/core.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { OauthModule } from './oauth/oauth.module';
+import { PaymentsModule } from './payments/payments.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { OauthModule } from './oauth/oauth.module';
     SessionsModule,
 
     // Domain
+    SubscriptionsModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}

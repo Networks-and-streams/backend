@@ -2,13 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
 import { PrismaService } from '@/core/prisma/prisma.service';
+import { SubscriptionPlan, SubscriptionStatus } from '@/generated/prisma/client';
 jest.mock('bcrypt');
 
 function createMockTx() {
   return {
     user: { create: jest.fn() },
-    profile: { create: jest.fn() },
-    statistics: { create: jest.fn() },
+    subscription: { create: jest.fn() },
   };
 }
 
@@ -22,21 +22,9 @@ function createMockPrismaService() {
       create: jest.fn(),
       delete: jest.fn(),
     },
-    profile: {
+    subscription: {
       create: jest.fn(),
       findUnique: jest.fn(),
-      update: jest.fn(),
-    },
-    session: {
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-      create: jest.fn(),
-      delete: jest.fn(),
-      deleteMany: jest.fn(),
-      update: jest.fn(),
-    },
-    statistics: {
-      create: jest.fn(),
     },
   };
 }
@@ -65,7 +53,7 @@ describe('UsersService', () => {
   });
 
   describe('create', () => {
-    it('hashes password with bcrypt and creates user+profile+statistics in a transaction', async () => {
+    it('hashes password with bcrypt and creates user + inactive subscription in a transaction', async () => {
       const hashed = 'hashed-password';
       (bcrypt.hash as jest.Mock).mockResolvedValue(hashed);
 
@@ -74,8 +62,7 @@ describe('UsersService', () => {
 
       const expectedUser = { id: '1', email: 'test@test.com', password: hashed };
       tx.user.create.mockResolvedValue(expectedUser);
-      tx.profile.create.mockResolvedValue({ userId: '1' });
-      tx.statistics.create.mockResolvedValue({ userId: '1' });
+      tx.subscription.create.mockResolvedValue({ userId: '1' });
 
       const result = await service.create('test@test.com', 'plain-password');
 
@@ -83,11 +70,12 @@ describe('UsersService', () => {
       expect(tx.user.create).toHaveBeenCalledWith({
         data: { email: 'test@test.com', password: hashed },
       });
-      expect(tx.profile.create).toHaveBeenCalledWith({
-        data: { userId: '1' },
-      });
-      expect(tx.statistics.create).toHaveBeenCalledWith({
-        data: { userId: '1' },
+      expect(tx.subscription.create).toHaveBeenCalledWith({
+        data: {
+          userId: '1',
+          status: SubscriptionStatus.INACTIVE,
+          plan: SubscriptionPlan.FREE,
+        },
       });
       expect(result).toEqual(expectedUser);
     });
@@ -100,13 +88,13 @@ describe('UsersService', () => {
   });
 
   describe('createOAuthUser', () => {
-    it('creates user and profile in a transaction without hashing password', async () => {
+    it('creates user and inactive subscription in a transaction without hashing password', async () => {
       const tx = createMockTx();
       prisma.$transaction.mockImplementation((fn: (t: ReturnType<typeof createMockTx>) => Promise<any>) => fn(tx));
 
       const expectedUser = { id: 'oauth-user-1', email: 'oauth@test.com', password: null };
       tx.user.create.mockResolvedValue(expectedUser);
-      tx.profile.create.mockResolvedValue({ userId: 'oauth-user-1' });
+      tx.subscription.create.mockResolvedValue({ userId: 'oauth-user-1' });
 
       const result = await service.createOAuthUser({
         email: 'oauth@test.com',
@@ -119,12 +107,11 @@ describe('UsersService', () => {
       expect(tx.user.create).toHaveBeenCalledWith({
         data: { email: 'oauth@test.com' },
       });
-      expect(tx.profile.create).toHaveBeenCalledWith({
+      expect(tx.subscription.create).toHaveBeenCalledWith({
         data: {
           userId: 'oauth-user-1',
-          firstName: 'OAuth',
-          lastName: 'User',
-          avatarUrl: 'https://avatar.jpg',
+          status: SubscriptionStatus.INACTIVE,
+          plan: SubscriptionPlan.FREE,
         },
       });
       expect(result).toEqual(expectedUser);
@@ -135,16 +122,18 @@ describe('UsersService', () => {
       prisma.$transaction.mockImplementation((fn: (t: ReturnType<typeof createMockTx>) => Promise<any>) => fn(tx));
 
       tx.user.create.mockResolvedValue({ id: 'u2', email: 'e', password: null });
-      tx.profile.create.mockResolvedValue({ userId: 'u2' });
+      tx.subscription.create.mockResolvedValue({ userId: 'u2' });
 
       await service.createOAuthUser({ email: 'e@test.com' });
 
-      expect(tx.profile.create).toHaveBeenCalledWith({
+      expect(tx.user.create).toHaveBeenCalledWith({
+        data: { email: 'e@test.com' },
+      });
+      expect(tx.subscription.create).toHaveBeenCalledWith({
         data: {
           userId: 'u2',
-          firstName: undefined,
-          lastName: undefined,
-          avatarUrl: undefined,
+          status: SubscriptionStatus.INACTIVE,
+          plan: SubscriptionPlan.FREE,
         },
       });
     });
