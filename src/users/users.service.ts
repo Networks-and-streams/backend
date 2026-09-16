@@ -1,0 +1,79 @@
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
+
+import type { User } from '@/generated/prisma/client';
+
+import { BCRYPT_SALT_ROUNDS } from '@/common/constants';
+import { PrismaService } from '@/core/prisma';
+
+@Injectable()
+export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(email: string, password: string): Promise<User> {
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          password: hashedPassword,
+        },
+      });
+
+      this.logger.log(`User ${user.id} created with email ${email}`);
+
+      return user;
+    });
+  }
+
+  async createOAuthUser(data: {
+    email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    avatarUrl?: string | null;
+  }): Promise<User> {
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: data.email,
+        },
+      });
+
+      this.logger.log(`User ${user.id} created via OAuth with email ${data.email}`);
+
+      return user;
+    });
+  }
+
+  async findByEmail(email: string): Promise<User | null> {
+    return this.prisma.user.findUnique({ where: { email } });
+  }
+
+  async findByEmailOrThrow(email: string): Promise<User> {
+    const user = await this.findByEmail(email);
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async findUserById(id: string): Promise<User | null> {
+    return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  async findByIdOrThrow(id: string): Promise<User> {
+    const user = await this.findUserById(id);
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  async getAllUsers(): Promise<User[]> {
+    return this.prisma.user.findMany();
+  }
+
+  async removeUserById(id: string): Promise<User> {
+    await this.findByIdOrThrow(id);
+    const user = await this.prisma.user.delete({ where: { id } });
+    this.logger.log(`User ${id} removed`);
+    return user;
+  }
+}
