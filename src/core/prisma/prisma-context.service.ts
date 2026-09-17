@@ -24,7 +24,14 @@ export class PrismaContextService {
 
     return this.prisma.$transaction(async (tx) => {
       this.cls.set(PRISMA_TX_KEY, tx);
-      return callback();
+      try {
+        return await callback();
+      } finally {
+        // Never leak the closed transaction into the request context: any
+        // query run after the transaction commits would otherwise be executed
+        // on an already-closed transaction ("Transaction already closed").
+        this.cls.set(PRISMA_TX_KEY, undefined);
+      }
     });
   }
 }

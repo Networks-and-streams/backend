@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
-import type { Response } from 'express';
+import type { CookieOptions, Response } from 'express';
 import ms from 'ms';
 import type { StringValue } from 'ms';
 
@@ -17,24 +17,27 @@ export class CookieService {
     private readonly jwt: ConfigType<typeof jwtConfig>,
   ) {}
 
+  private baseOptions(): CookieOptions {
+    return {
+      httpOnly: true,
+      secure: this.app.cookieSecure,
+      sameSite: this.app.cookieSameSite,
+      // Always include `domain` (even when empty). An empty COOKIE_DOMAIN
+      // produces a host-only cookie (no Domain attribute), which is required
+      // when the frontend and API share one origin behind a local tunnel
+      // (ngrok): a Domain=localhost cookie would be rejected for any other
+      // host — both by Express 5's own domain validation and by the browser.
+      domain: this.app.cookieDomain || undefined,
+    };
+  }
+
   setRefreshToken(res: Response, token: string) {
     const maxAge = ms(this.jwt.refreshTokenTtl as StringValue);
 
-    res.cookie('refreshToken', token, {
-      httpOnly: true,
-      domain: this.app.cookieDomain,
-      maxAge,
-      secure: this.app.cookieSecure,
-      sameSite: this.app.cookieSameSite,
-    });
+    res.cookie('refreshToken', token, { ...this.baseOptions(), maxAge });
   }
 
   clearRefreshToken(res: Response) {
-    res.clearCookie('refreshToken', {
-      httpOnly: true,
-      domain: this.app.cookieDomain,
-      secure: this.app.cookieSecure,
-      sameSite: this.app.cookieSameSite,
-    });
+    res.clearCookie('refreshToken', this.baseOptions());
   }
 }
