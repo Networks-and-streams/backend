@@ -127,6 +127,8 @@ export type WebhookPaymentStatus = 'succeeded' | 'failed' | 'processing' | 'refu
 
 export interface WebhookEvent {
   type: string;
+  /** PSP's unique event identifier (e.g. Stripe's evt_...). Used for persistent idempotency. */
+  eventId?: string;
   providerPaymentId: string;
   status: WebhookPaymentStatus;
   metadata?: Record<string, unknown>;
@@ -135,7 +137,12 @@ export interface WebhookEvent {
 export interface VerifyWebhookRequest {
   /** Raw request headers — used for signature verification. */
   headers: Record<string, string>;
-  /** Raw webhook payload. */
+  /**
+   * Raw webhook payload.
+   *
+   * For providers that verify signatures over the raw bytes (e.g. Stripe),
+   * this must be the raw body Buffer, not the parsed JSON.
+   */
   body: unknown;
 }
 

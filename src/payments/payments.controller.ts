@@ -101,8 +101,10 @@ export class PaymentsController {
   })
   @ApiOkResponse({ description: 'Webhook acknowledged' })
   @ApiUnauthorizedResponse({ description: 'Invalid webhook signature' })
-  async webhook(@Req() req: Request, @Body() body: unknown) {
+  async webhook(@Req() req: Request & { rawBody?: Buffer }, @Body() _body: unknown) {
     const headers = req.headers as Record<string, string>;
-    return this.paymentsService.handleWebhook(headers, body);
+    // Stripe signature verification requires the raw body bytes, not the
+    // JSON-parsed object. `StripeWebhookRawBodyMiddleware` captures it.
+    return this.paymentsService.handleWebhook(headers, req.rawBody);
   }
 }

@@ -169,6 +169,25 @@ export class PaymentsService {
     const event = verification.event;
     const providerPaymentId = event.providerPaymentId;
 
+    // Persistent idempotency: if this exact provider event was already recorded,
+    // the delivery is a retry (Stripe redelivers events). Acknowledge without
+    // re-processing — the side effects ran on the first delivery.
+    if (event.eventId) {
+      const alreadyProcessed = await this.prisma.paymentWebhookEvent.findUnique({
+        where: {
+          provider_eventId: {
+            provider: this.resolveProvider(this.payment.provider),
+            eventId: event.eventId,
+          },
+        },
+      });
+
+      if (alreadyProcessed) {
+        this.logger.log(`Duplicate webhook event ${event.eventId} — already processed, acknowledging`);
+        return { received: true };
+      }
+    }
+
     const payment = await this.prisma.payment.findUnique({ where: { providerPaymentId } });
     if (!payment) {
       // Unknown reference — acknowledge so the PSP stops retrying, log for audit.
@@ -209,6 +228,19 @@ export class PaymentsService {
       if (newStatus === PaymentStatus.SUCCEEDED && payment.subscriptionId) {
         await this.subscriptionsService.activate(payment.userId, payment.plan, tx);
         this.logger.log(`Subscription ${payment.subscriptionId} activated after successful payment ${payment.id}`);
+      }
+
+      // Record the processed event so retries of the same delivery are no-ops
+      // (DB unique constraint on [provider, eventId] is the backstop).
+      if (event.eventId) {
+        await tx.paymentWebhookEvent.create({
+          data: {
+            provider: payment.provider,
+            eventId: event.eventId,
+            paymentId: payment.id,
+            processedAt: new Date(),
+          },
+        });
       }
     });
 

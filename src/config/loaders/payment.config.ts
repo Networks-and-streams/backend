@@ -8,6 +8,15 @@ const paymentEnvSchema = z.object({
     .min(16, 'PAYMENT_WEBHOOK_SECRET must be at least 16 characters long'),
   PAYMENT_PROVIDER: z.enum(['stripe', 'liqpay', 'wayforpay']).default('stripe'),
   GOOGLE_PAY_MER_ID: z.string({ error: 'GOOGLE_PAY_MER_ID is required' }).min(1, 'GOOGLE_PAY_MER_ID cannot be empty'),
+
+  // Stripe-specific
+  STRIPE_SECRET_KEY: z
+    .string({ error: 'STRIPE_SECRET_KEY is required when using Stripe' })
+    .min(1, 'STRIPE_SECRET_KEY cannot be empty'),
+  STRIPE_WEBHOOK_SECRET: z
+    .string({ error: 'STRIPE_WEBHOOK_SECRET is required when using Stripe' })
+    .min(1, 'STRIPE_WEBHOOK_SECRET cannot be empty'),
+  STRIPE_API_VERSION: z.string().optional(),
 });
 
 export default registerAs('payment', () => {
@@ -18,5 +27,10 @@ export default registerAs('payment', () => {
     defaultCurrency: env.PAYMENT_CURRENCY,
     webhookSecret: env.PAYMENT_WEBHOOK_SECRET,
     googlePayMerchantId: env.GOOGLE_PAY_MER_ID,
+
+    // Stripe
+    stripeSecretKey: env.STRIPE_SECRET_KEY,
+    stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
+    stripeApiVersion: env.STRIPE_API_VERSION,
   };
 });

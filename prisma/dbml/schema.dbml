@@ -18,6 +18,7 @@ Table Payment {
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
   user User [not null]
+  webhookEvents PaymentWebhookEvent [not null]
 }
 
 Table Subscription {
@@ -69,6 +70,29 @@ Table User {
   oauthAccounts OAuthAccount [not null]
   subscription Subscription
   payments Payment [not null]
+}
+
+Table PaymentWebhookEvent {
+  id String [pk]
+  provider PaymentProvider [not null]
+  eventId String [not null]
+  paymentId String
+  payment Payment
+  receivedAt DateTime [default: `now()`, not null]
+  processedAt DateTime
+
+  indexes {
+    (provider, eventId) [unique]
+  }
+
+  Note: '*
+ * Persistent idempotency key for webhook deliveries.
+ *
+ * A PSP may deliver the same event multiple times. This model ensures
+ * each (provider, eventId) pair is processed exactly once.
+ *
+ * The `paymentId` column enables fast lookups when processing webhooks
+ * but the canonical lookup is by (provider, eventId).'
 }
 
 Enum PaymentStatus {
@@ -124,3 +148,5 @@ Ref: Subscription.userId - User.id [delete: Cascade]
 Ref: OAuthAccount.userId > User.id [delete: Cascade]
 
 Ref: Session.userId > User.id [delete: Cascade]
+
+Ref: PaymentWebhookEvent.paymentId > Payment.id [delete: Set Null]

@@ -62,6 +62,9 @@ function createMockTx() {
     subscription: {
       update: jest.fn(),
     },
+    paymentWebhookEvent: {
+      create: jest.fn(),
+    },
   };
 }
 
@@ -75,6 +78,10 @@ function createMockPrisma() {
       create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
+    },
+    paymentWebhookEvent: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
     },
   };
 }
@@ -343,8 +350,13 @@ describe('PaymentsService', () => {
       status: 'succeeded' | 'failed' | 'processing' | 'refunded' | 'pending',
       providerPaymentId = 'psp-1',
     ) {
-      return { type: 'payment.updated', providerPaymentId, status };
+      return { type: 'payment.updated', eventId: 'evt_test_1', providerPaymentId, status };
     }
+
+    // Default: event idempotency lookup returns null (no duplicate).
+    beforeEach(() => {
+      prisma.paymentWebhookEvent.findUnique.mockResolvedValue(null);
+    });
 
     it('rejects a webhook with an invalid signature', async () => {
       gateway.verifyWebhook.mockResolvedValue({ valid: false });
@@ -369,6 +381,7 @@ describe('PaymentsService', () => {
       tx.payment.findUnique.mockResolvedValue(basePayment);
       tx.payment.update.mockResolvedValue({ ...basePayment, status: PaymentStatus.SUCCEEDED });
       subscriptions.activate.mockResolvedValue({});
+      tx.paymentWebhookEvent.create.mockResolvedValue({});
 
       const result = await service.handleWebhook(headers, {});
 
@@ -378,6 +391,11 @@ describe('PaymentsService', () => {
         }),
       );
       expect(subscriptions.activate).toHaveBeenCalledWith('user-1', SubscriptionPlan.PREMIUM, tx);
+      expect(tx.paymentWebhookEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ provider: PaymentProvider.STRIPE, eventId: 'evt_test_1' }),
+        }),
+      );
       expect(result).toEqual({ received: true });
     });
 
@@ -386,6 +404,7 @@ describe('PaymentsService', () => {
       prisma.payment.findUnique.mockResolvedValueOnce(basePayment);
       tx.payment.findUnique.mockResolvedValue(basePayment);
       tx.payment.update.mockResolvedValue({ ...basePayment, status: PaymentStatus.FAILED });
+      tx.paymentWebhookEvent.create.mockResolvedValue({});
 
       await service.handleWebhook(headers, {});
 
@@ -443,6 +462,47 @@ describe('PaymentsService', () => {
       expect(result).toEqual({ received: true });
       expect(tx.payment.update).not.toHaveBeenCalled();
       expect(subscriptions.activate).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent: a previously recorded provider event is acknowledged without re-processing', async () => {
+      // The same Stripe event (same eventId) was already processed.
+      prisma.paymentWebhookEvent.findUnique.mockResolvedValue({
+        id: 'wev-1',
+        provider: PaymentProvider.STRIPE,
+        eventId: 'evt_test_1',
+        paymentId: 'pay-1',
+        receivedAt: new Date(),
+        processedAt: new Date(),
+      });
+      gateway.verifyWebhook.mockResolvedValue({ valid: true, event: webhookEvent('succeeded') });
+
+      const result = await service.handleWebhook(headers, {});
+
+      expect(result).toEqual({ received: true });
+      // No payment lookup happened — the event was already recorded as processed.
+      expect(prisma.payment.findUnique).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(subscriptions.activate).not.toHaveBeenCalled();
+    });
+
+    it('persists the webhook event record inside the same transaction as the payment update', async () => {
+      gateway.verifyWebhook.mockResolvedValue({ valid: true, event: webhookEvent('succeeded') });
+      prisma.payment.findUnique.mockResolvedValueOnce(basePayment);
+      tx.payment.findUnique.mockResolvedValue(basePayment);
+      tx.payment.update.mockResolvedValue({ ...basePayment, status: PaymentStatus.SUCCEEDED });
+      tx.paymentWebhookEvent.create.mockResolvedValue({});
+      subscriptions.activate.mockResolvedValue({});
+
+      await service.handleWebhook(headers, {});
+
+      // Both the payment update, subscription activation, and event record
+      // happen within a single $transaction — all-or-nothing.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.paymentWebhookEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ paymentId: 'pay-1', eventId: 'evt_test_1' }),
+        }),
+      );
     });
   });
 });

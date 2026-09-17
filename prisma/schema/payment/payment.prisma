@@ -21,6 +21,8 @@ model Payment {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  webhookEvents PaymentWebhookEvent[]
+
   @@index([userId])
   @@index([status])
   @@index([providerPaymentId])
