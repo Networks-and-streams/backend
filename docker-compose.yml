@@ -33,9 +33,7 @@ services:
     env_file:
       - .env
     command: >
-      listen
-      --forward-to host.docker.internal:${PORT:-3001}/payments/webhook
-      --api-key ${STRIPE_SECRET_KEY}
+      listen --forward-to host.docker.internal:${PORT:-3000}/payments/webhook --api-key ${STRIPE_SECRET_KEY}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

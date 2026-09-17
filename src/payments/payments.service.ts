@@ -14,7 +14,7 @@ import type { Payment } from '@/generated/prisma/client';
 import { PaymentProvider, PaymentStatus, Prisma } from '@/generated/prisma/client';
 
 import paymentConfig from '@/config/loaders/payment.config';
-import { PrismaService } from '@/core/prisma';
+import { PrismaContextService } from '@/core/prisma';
 import { SubscriptionsService } from '@/subscriptions/subscriptions.service';
 import { PAYMENT_GATEWAY } from './payment.gateway';
 import type { PaymentGateway } from './payment.gateway';
@@ -33,7 +33,7 @@ export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: PrismaContextService,
     private readonly subscriptionsService: SubscriptionsService,
 
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
@@ -56,7 +56,7 @@ export class PaymentsService {
     }
 
     // Idempotency: reuse an existing payable payment if present.
-    const existing = await this.prisma.payment.findFirst({
+    const existing = await this.db.client.payment.findFirst({
       where: { userId, subscriptionId: subscription.id, status: PaymentStatus.PENDING },
     });
     if (existing) {
@@ -64,7 +64,7 @@ export class PaymentsService {
       return existing;
     }
 
-    const payment = await this.prisma.payment.create({
+    const payment = await this.db.client.payment.create({
       data: {
         userId,
         subscriptionId: subscription.id,
@@ -88,7 +88,7 @@ export class PaymentsService {
    * indistinguishable from non-existent payments (404).
    */
   async getPayment(userId: string, paymentId: string): Promise<Payment> {
-    const payment = await this.prisma.payment.findFirst({ where: { id: paymentId, userId } });
+    const payment = await this.db.client.payment.findFirst({ where: { id: paymentId, userId } });
     if (!payment) {
       throw new NotFoundException('Payment not found');
     }
@@ -107,7 +107,7 @@ export class PaymentsService {
    */
   async processGooglePay(userId: string, paymentId: string, dto: GooglePayDto): Promise<Payment> {
     // Atomic claim — only one request can move PENDING → PROCESSING.
-    const claimed = await this.prisma.payment.updateMany({
+    const claimed = await this.db.client.payment.updateMany({
       where: { id: paymentId, userId, status: PaymentStatus.PENDING },
       data: { status: PaymentStatus.PROCESSING },
     });
@@ -173,7 +173,7 @@ export class PaymentsService {
     // the delivery is a retry (Stripe redelivers events). Acknowledge without
     // re-processing — the side effects ran on the first delivery.
     if (event.eventId) {
-      const alreadyProcessed = await this.prisma.paymentWebhookEvent.findUnique({
+      const alreadyProcessed = await this.db.client.paymentWebhookEvent.findUnique({
         where: {
           provider_eventId: {
             provider: this.resolveProvider(this.payment.provider),
@@ -188,7 +188,7 @@ export class PaymentsService {
       }
     }
 
-    const payment = await this.prisma.payment.findUnique({ where: { providerPaymentId } });
+    const payment = await this.db.client.payment.findUnique({ where: { providerPaymentId } });
     if (!payment) {
       // Unknown reference — acknowledge so the PSP stops retrying, log for audit.
       this.logger.warn(`Webhook for unknown provider payment ID ${providerPaymentId}`);
@@ -209,15 +209,15 @@ export class PaymentsService {
       return { received: true };
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      const current = await tx.payment.findUnique({ where: { id: payment.id } });
+    await this.db.transaction(async () => {
+      const current = await this.db.client.payment.findUnique({ where: { id: payment.id } });
       // Guard against concurrent webhook deliveries.
-      if (!current || current.status !== payment.status) {
+      if (!current?.status || current.status !== payment.status) {
         this.logger.log(`Webhook for payment ${payment.id} raced with another update — skipped`);
         return;
       }
 
-      await tx.payment.update({
+      await this.db.client.payment.update({
         where: { id: payment.id },
         data: {
           status: newStatus,
@@ -226,14 +226,14 @@ export class PaymentsService {
       });
 
       if (newStatus === PaymentStatus.SUCCEEDED && payment.subscriptionId) {
-        await this.subscriptionsService.activate(payment.userId, payment.plan, tx);
+        await this.subscriptionsService.activate(payment.userId, payment.plan);
         this.logger.log(`Subscription ${payment.subscriptionId} activated after successful payment ${payment.id}`);
       }
 
       // Record the processed event so retries of the same delivery are no-ops
       // (DB unique constraint on [provider, eventId] is the backstop).
       if (event.eventId) {
-        await tx.paymentWebhookEvent.create({
+        await this.db.client.paymentWebhookEvent.create({
           data: {
             provider: payment.provider,
             eventId: event.eventId,
@@ -253,8 +253,8 @@ export class PaymentsService {
     providerPaymentId?: string,
     metadata?: Record<string, unknown>,
   ): Promise<Payment> {
-    await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({
+    await this.db.transaction(async () => {
+      await this.db.client.payment.update({
         where: { id: payment.id },
         data: {
           status: PaymentStatus.SUCCEEDED,
@@ -264,7 +264,7 @@ export class PaymentsService {
       });
 
       if (payment.subscriptionId) {
-        await this.subscriptionsService.activate(payment.userId, payment.plan, tx);
+        await this.subscriptionsService.activate(payment.userId, payment.plan);
       }
     });
 
@@ -273,7 +273,7 @@ export class PaymentsService {
   }
 
   private async markPaymentFailed(paymentId: string, providerPaymentId?: string, reason?: string): Promise<Payment> {
-    await this.prisma.payment.update({
+    await this.db.client.payment.update({
       where: { id: paymentId },
       data: {
         status: PaymentStatus.FAILED,
@@ -286,7 +286,7 @@ export class PaymentsService {
 
   private async attachProviderReference(paymentId: string, providerPaymentId?: string): Promise<Payment> {
     if (providerPaymentId) {
-      await this.prisma.payment.update({
+      await this.db.client.payment.update({
         where: { id: paymentId },
         data: { providerPaymentId },
       });
@@ -299,9 +299,9 @@ export class PaymentsService {
    * error without leaking other users' payment existence.
    */
   private async throwIfNotProcessable(userId: string, paymentId: string): Promise<never> {
-    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    const payment = await this.db.client.payment.findUnique({ where: { id: paymentId } });
 
-    if (!payment || payment.userId !== userId) {
+    if (!payment?.userId || payment.userId !== userId) {
       throw new NotFoundException('Payment not found');
     }
 
@@ -319,7 +319,7 @@ export class PaymentsService {
   }
 
   private async getPaymentById(paymentId: string): Promise<Payment> {
-    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    const payment = await this.db.client.payment.findUnique({ where: { id: paymentId } });
     if (!payment) throw new NotFoundException('Payment not found');
     return payment;
   }

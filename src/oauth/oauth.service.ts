@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OAuthProvider } from '@/generated/prisma/client';
 
-import { PrismaService } from '@/core/prisma';
+import { PrismaContextService } from '@/core/prisma';
 import { UsersService } from '@/users/users.service';
 import { AuthService } from '@/auth/auth.service';
 
@@ -16,7 +16,7 @@ interface SessionMetadata {
 export class OauthService {
   private readonly logger = new Logger(OauthService.name);
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly db: PrismaContextService,
     private readonly usersService: UsersService,
     private readonly authService: AuthService,
   ) {}
@@ -42,7 +42,7 @@ export class OauthService {
   }
 
   private async findOAuthAccount(provider: OAuthProvider, providerAccountId: string) {
-    return this.prisma.oAuthAccount.findUnique({
+    return this.db.client.oAuthAccount.findUnique({
       where: {
         provider_providerAccountId: { provider, providerAccountId },
       },
@@ -59,7 +59,7 @@ export class OauthService {
   }
 
   private async linkOAuthAccount(userId: string, profile: NormalizedOAuthProfile) {
-    await this.prisma.oAuthAccount.create({
+    await this.db.client.oAuthAccount.create({
       data: {
         provider: profile.provider,
         providerAccountId: profile.providerAccountId,
