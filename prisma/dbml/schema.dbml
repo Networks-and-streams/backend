@@ -2,6 +2,38 @@
 //// THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 //// ------------------------------------------------------
 
+Table Payment {
+  id String [pk]
+  userId String [not null]
+  subscriptionId String
+  subscription Subscription
+  provider PaymentProvider [not null]
+  paymentMethod PaymentMethod [not null]
+  status PaymentStatus [not null, default: 'PENDING']
+  plan SubscriptionPlan [not null, default: 'FREE']
+  amount Int [not null, default: 0]
+  currency String [not null, default: 'USD']
+  providerPaymentId String [unique]
+  providerMetadata Json
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+  user User [not null]
+  webhookEvents PaymentWebhookEvent [not null]
+}
+
+Table Subscription {
+  id String [pk]
+  userId String [unique, not null]
+  status SubscriptionStatus [not null, default: 'INACTIVE']
+  plan SubscriptionPlan [not null, default: 'FREE']
+  startedAt DateTime
+  expiresAt DateTime
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+  user User [not null]
+  payments Payment [not null]
+}
+
 Table OAuthAccount {
   id String [pk]
   provider OAuthProvider [not null]
@@ -36,6 +68,65 @@ Table User {
   updatedAt DateTime [not null]
   sessions Session [not null]
   oauthAccounts OAuthAccount [not null]
+  subscription Subscription
+  payments Payment [not null]
+}
+
+Table PaymentWebhookEvent {
+  id String [pk]
+  provider PaymentProvider [not null]
+  eventId String [not null]
+  paymentId String
+  payment Payment
+  receivedAt DateTime [default: `now()`, not null]
+  processedAt DateTime
+
+  indexes {
+    (provider, eventId) [unique]
+  }
+
+  Note: '*
+ * Persistent idempotency key for webhook deliveries.
+ *
+ * A PSP may deliver the same event multiple times. This model ensures
+ * each (provider, eventId) pair is processed exactly once.
+ *
+ * The `paymentId` column enables fast lookups when processing webhooks
+ * but the canonical lookup is by (provider, eventId).'
+}
+
+Enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+Enum PaymentProvider {
+  STRIPE
+  LIQPAY
+  WAYFORPAY
+}
+
+Enum PaymentMethod {
+  CARD
+  GOOGLE_PAY
+  APPLE_PAY
+}
+
+Enum SubscriptionStatus {
+  INACTIVE
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+Enum SubscriptionPlan {
+  FREE
+  PREMIUM
 }
 
 Enum Gender {
@@ -48,6 +139,14 @@ Enum OAuthProvider {
   GOOGLE
 }
 
+Ref: Payment.subscriptionId > Subscription.id [delete: Set Null]
+
+Ref: Payment.userId > User.id [delete: Cascade]
+
+Ref: Subscription.userId - User.id [delete: Cascade]
+
 Ref: OAuthAccount.userId > User.id [delete: Cascade]
 
 Ref: Session.userId > User.id [delete: Cascade]
+
+Ref: PaymentWebhookEvent.paymentId > Payment.id [delete: Set Null]

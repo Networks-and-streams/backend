@@ -1,0 +1,24 @@
+/**
+ * Persistent idempotency key for webhook deliveries.
+ *
+ * A PSP may deliver the same event multiple times. This model ensures
+ * each (provider, eventId) pair is processed exactly once.
+ *
+ * The `paymentId` column enables fast lookups when processing webhooks
+ * but the canonical lookup is by (provider, eventId).
+ */
+model PaymentWebhookEvent {
+  id       String          @id @default(uuid())
+  provider PaymentProvider
+  eventId  String          // PSP's unique event identifier (e.g. Stripe's evt_...)
+
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, eventId])
+  @@index([paymentId])
+  @@index([provider])
+}

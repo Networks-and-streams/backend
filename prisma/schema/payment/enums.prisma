@@ -1,0 +1,33 @@
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  STRIPE
+  LIQPAY
+  WAYFORPAY
+}
+
+enum PaymentMethod {
+  CARD
+  GOOGLE_PAY
+  APPLE_PAY
+}
+
+enum SubscriptionStatus {
+  INACTIVE
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+enum SubscriptionPlan {
+  FREE
+  PREMIUM
+}

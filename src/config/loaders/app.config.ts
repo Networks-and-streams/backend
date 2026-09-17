@@ -4,7 +4,11 @@ import { z } from 'zod';
 const appEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
-  COOKIE_DOMAIN: z.string().min(1, 'COOKIE_DOMAIN is required'),
+  // Empty string = host-only cookie (no Domain attribute). This is what the
+  // local tunnel needs: frontend and API share one public origin, and a
+  // Domain cookie (e.g. Domain=localhost) would be rejected by the browser
+  // for any other host. Production deployments set this to their real domain.
+  COOKIE_DOMAIN: z.string().default(''),
 
   COOKIE_SECURE: z.coerce.boolean().default(false),
 

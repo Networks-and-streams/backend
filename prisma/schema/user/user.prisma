@@ -8,4 +8,6 @@ model User {
 
   sessions      Session[] // Active devices
   oauthAccounts OAuthAccount[]
+  subscription  Subscription?
+  payments      Payment[]
 }

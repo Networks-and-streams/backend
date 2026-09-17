@@ -1,0 +1,11 @@
+# Build context exclusions — keep secrets and build output out of images.
+node_modules
+dist
+coverage
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
