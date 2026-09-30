@@ -2,6 +2,16 @@
 //// THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 //// ------------------------------------------------------
 
+Table SavedGraph {
+  id String [pk]
+  userId String [not null]
+  name String [not null]
+  graph Json [not null]
+  createdAt DateTime [default: `now()`, not null]
+  updatedAt DateTime [not null]
+  user User [not null]
+}
+
 Table Payment {
   id String [pk]
   userId String [not null]
@@ -70,6 +80,7 @@ Table User {
   oauthAccounts OAuthAccount [not null]
   subscription Subscription
   payments Payment [not null]
+  savedGraphs SavedGraph [not null]
 }
 
 Table PaymentWebhookEvent {
@@ -138,6 +149,8 @@ Enum Gender {
 Enum OAuthProvider {
   GOOGLE
 }
+
+Ref: SavedGraph.userId > User.id [delete: Cascade]
 
 Ref: Payment.subscriptionId > Subscription.id [delete: Set Null]
 

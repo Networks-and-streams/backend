@@ -1,4 +1,24 @@
 services:
+  compute:
+    build:
+      context: ../compute
+      dockerfile: Dockerfile
+    container_name: graph_compute
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    environment:
+      COMPUTE_ADDR: 0.0.0.0:50051
+    volumes:
+      - compute_data:/data
+    healthcheck:
+      test: ["CMD", "compute", "--help"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network
+
   db:
     image: postgres:15
     restart: always
@@ -37,6 +57,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+networks:
+  app-network:
+    driver: bridge
+
 volumes:
   db_data:
   redis-data:
+  compute_data:

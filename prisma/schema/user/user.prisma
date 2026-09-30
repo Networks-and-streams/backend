@@ -10,4 +10,5 @@ model User {
   oauthAccounts OAuthAccount[]
   subscription  Subscription?
   payments      Payment[]
+  savedGraphs   SavedGraph[]
 }
