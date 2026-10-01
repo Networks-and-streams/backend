@@ -16,7 +16,7 @@ import {
 } from '@/generated/prisma/client';
 
 import { SubscriptionsService } from '@/subscriptions/subscriptions.service';
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { PrismaContextService } from '@/core/prisma';
 import paymentConfig from '@/config/loaders/payment.config';
 import { PAYMENT_GATEWAY } from './payment.gateway';
 import { PaymentsService } from './payments.service';
@@ -133,7 +133,28 @@ describe('PaymentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
-        { provide: PrismaService, useValue: prisma },
+        {
+          provide: PrismaContextService,
+          useValue: (() => {
+            // Mirrors PrismaContextService: `client` resolves to the
+            // transaction client inside `transaction()`, otherwise the base
+            // client (CLS-based in production).
+            let client: ReturnType<typeof createMockPrisma> | ReturnType<typeof createMockTx> = prisma;
+            return {
+              get client() {
+                return client;
+              },
+              transaction: async (fn: () => Promise<unknown>) => {
+                client = tx;
+                try {
+                  return await prisma.$transaction(fn);
+                } finally {
+                  client = prisma;
+                }
+              },
+            };
+          })(),
+        },
         { provide: SubscriptionsService, useValue: subscriptions },
         { provide: PAYMENT_GATEWAY, useValue: gateway },
         { provide: paymentConfig.KEY, useValue: paymentConfigMock },
@@ -261,7 +282,7 @@ describe('PaymentsService', () => {
           data: expect.objectContaining({ status: PaymentStatus.SUCCEEDED, providerPaymentId: 'psp-1' }),
         }),
       );
-      expect(subscriptions.activate).toHaveBeenCalledWith('user-1', SubscriptionPlan.PREMIUM, tx);
+      expect(subscriptions.activate).toHaveBeenCalledWith('user-1', SubscriptionPlan.PREMIUM);
       expect(result.status).toBe(PaymentStatus.SUCCEEDED);
     });
 
@@ -390,7 +411,7 @@ describe('PaymentsService', () => {
           data: expect.objectContaining({ status: PaymentStatus.SUCCEEDED }),
         }),
       );
-      expect(subscriptions.activate).toHaveBeenCalledWith('user-1', SubscriptionPlan.PREMIUM, tx);
+      expect(subscriptions.activate).toHaveBeenCalledWith('user-1', SubscriptionPlan.PREMIUM);
       expect(tx.paymentWebhookEvent.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ provider: PaymentProvider.STRIPE, eventId: 'evt_test_1' }),

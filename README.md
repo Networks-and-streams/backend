@@ -139,7 +139,7 @@ STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... npm run start:dev
 10. Stripe CLI forwards the events; the backend verifies the signature.
 11. `GET /payments/:id` → `SUCCEEDED`; `GET /subscriptions/me` → `ACTIVE`.
 
-> **Note:** The Google Pay TEST sheet must be implemented in the frontend. This repository contains only the backend `POST /payments/:id/google-pay` contract — the token payload is the raw Google Pay `PaymentData.tokenizationData` object. Until the frontend integration exists, the flow ends at step 6/7 and cannot be fully exercised end-to-end.
+> **Note:** The frontend implements the Google Pay TEST sheet (`frontend/src/features/subscription/`). The token payload sent to `POST /payments/:id/google-pay` is Google Pay's `PaymentData.paymentMethodData.tokenizationData` (for the Stripe gateway: `{ type: 'PAYMENT_GATEWAY', token: 'tok_...' | 'pm_...' }`). To exercise it end-to-end you also need the **public** Stripe publishable key in the frontend environment (`VITE_STRIPE_PUBLISHABLE_KEY`), matching the backend's `STRIPE_SECRET_KEY` mode.
 
 ### Environment Variables
 

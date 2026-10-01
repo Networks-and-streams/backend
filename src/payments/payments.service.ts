@@ -118,6 +118,8 @@ export class PaymentsService {
 
     const payment = await this.getPayment(userId, paymentId);
 
+    this.logger.log(`Submitting Google Pay token for payment ${payment.id} (provider ${payment.provider})`);
+
     try {
       const result = await this.gateway.processGooglePay({
         paymentId: payment.id,
@@ -278,7 +280,7 @@ export class PaymentsService {
       data: {
         status: PaymentStatus.FAILED,
         providerPaymentId: providerPaymentId ?? undefined,
-        providerMetadata: (reason ? { failureReason: reason } : undefined) as Prisma.InputJsonValue | undefined,
+        providerMetadata: reason ? { failureReason: reason } : undefined,
       },
     });
     return this.getPaymentById(paymentId);
