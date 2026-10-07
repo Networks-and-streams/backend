@@ -1,3 +1,4 @@
+import { AccountEmailService } from '@/users/account-email.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
@@ -80,6 +81,7 @@ describe('AuthService', () => {
         { provide: TokenService, useValue: tokenServiceMock },
         { provide: UsersService, useValue: usersServiceMock },
         { provide: SessionsService, useValue: sessionsServiceMock },
+        { provide: AccountEmailService, useValue: { sendVerification: jest.fn().mockResolvedValue(undefined) } },
         { provide: jwtConfig.KEY, useValue: jwtConfigMock },
       ],
     }).compile();

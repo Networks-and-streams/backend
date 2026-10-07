@@ -4,6 +4,8 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { join } from 'path';
 import { GraphService } from './graph.service';
 import { GraphController } from './graph.controller';
+import { ComputeQuotaService } from './compute-quota.service';
+import { SubscriptionsModule } from '@/subscriptions/subscriptions.module';
 
 /**
  * Compute connectivity.
@@ -17,11 +19,11 @@ import { GraphController } from './graph.controller';
  * working: `localhost:50051` and `../compute/proto/compute.proto`.
  */
 const computeUrl = process.env.COMPUTE_URL ?? 'localhost:50051';
-const computeProtoPath =
-  process.env.COMPUTE_PROTO_PATH ?? join(process.cwd(), '../compute/proto/compute.proto');
+const computeProtoPath = process.env.COMPUTE_PROTO_PATH ?? join(process.cwd(), '../compute/proto/compute.proto');
 
 @Module({
   imports: [
+    SubscriptionsModule,
     ClientsModule.register([
       {
         name: 'COMPUTE_PACKAGE',
@@ -35,7 +37,7 @@ const computeProtoPath =
     ]),
   ],
   controllers: [GraphController],
-  providers: [GraphService],
+  providers: [GraphService, ComputeQuotaService],
   exports: [GraphService],
 })
-export class GraphModule { }
+export class GraphModule {}

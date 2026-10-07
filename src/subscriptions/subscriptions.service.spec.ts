@@ -3,7 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 
 import { SubscriptionPlan, SubscriptionStatus } from '@/generated/prisma/client';
 
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { PrismaContextService } from '@/core/prisma';
 import { SubscriptionsService, SUBSCRIPTION_DURATION_MS } from './subscriptions.service';
 
 function createMockPrisma() {
@@ -34,7 +34,13 @@ describe('SubscriptionsService', () => {
     prisma = createMockPrisma();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SubscriptionsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        SubscriptionsService,
+        {
+          provide: PrismaContextService,
+          useValue: { client: prisma, transaction: (cb: () => Promise<unknown>) => cb() },
+        },
+      ],
     }).compile();
 
     service = module.get<SubscriptionsService>(SubscriptionsService);

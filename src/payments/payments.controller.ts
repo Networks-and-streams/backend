@@ -49,6 +49,15 @@ export class PaymentsController {
     return this.paymentsMapper.toResponse(payment);
   }
 
+  @Get()
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: "Current user's payment history (newest first)" })
+  @ApiOkResponse({ type: [PaymentResponseDto] })
+  async listPayments(@CurrentUser() user: JwtUser): Promise<PaymentResponseDto[]> {
+    const payments = await this.paymentsService.listPayments(user.id);
+    return payments.map((payment) => this.paymentsMapper.toResponse(payment));
+  }
+
   @Get(':id')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({

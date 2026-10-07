@@ -87,6 +87,11 @@ export class PaymentsService {
    * Returns a payment owned by the given user. Other users' payments are
    * indistinguishable from non-existent payments (404).
    */
+  /** The user's payments, newest first (payment history). */
+  listPayments(userId: string): Promise<Payment[]> {
+    return this.db.client.payment.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+  }
+
   async getPayment(userId: string, paymentId: string): Promise<Payment> {
     const payment = await this.db.client.payment.findFirst({ where: { id: paymentId, userId } });
     if (!payment) {
@@ -227,7 +232,8 @@ export class PaymentsService {
         },
       });
 
-      if (newStatus === PaymentStatus.SUCCEEDED && payment.subscriptionId) {
+      // No owner = the account was deleted (payment kept anonymized): nothing to activate.
+      if (newStatus === PaymentStatus.SUCCEEDED && payment.subscriptionId && payment.userId) {
         await this.subscriptionsService.activate(payment.userId, payment.plan);
         this.logger.log(`Subscription ${payment.subscriptionId} activated after successful payment ${payment.id}`);
       }
@@ -255,6 +261,10 @@ export class PaymentsService {
     providerPaymentId?: string,
     metadata?: Record<string, unknown>,
   ): Promise<Payment> {
+    // Only reached from the owner's own request, so the payment has an owner.
+    const userId = payment.userId;
+    if (!userId) throw new NotFoundException('Payment not found');
+
     await this.db.transaction(async () => {
       await this.db.client.payment.update({
         where: { id: payment.id },
@@ -266,12 +276,12 @@ export class PaymentsService {
       });
 
       if (payment.subscriptionId) {
-        await this.subscriptionsService.activate(payment.userId, payment.plan);
+        await this.subscriptionsService.activate(userId, payment.plan);
       }
     });
 
     this.logger.log(`Payment ${payment.id} succeeded and subscription activated`);
-    return this.getPayment(payment.userId, payment.id);
+    return this.getPayment(userId, payment.id);
   }
 
   private async markPaymentFailed(paymentId: string, providerPaymentId?: string, reason?: string): Promise<Payment> {

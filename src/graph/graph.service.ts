@@ -12,6 +12,7 @@ interface ComputeServiceGrpc {
       source: number;
     };
     includeSteps: boolean;
+    target?: number;
   }): Observable<{
     status: string;
     resultJson: string;
@@ -24,19 +25,20 @@ interface ComputeServiceGrpc {
 export class GraphService implements OnModuleInit {
   private computeService: ComputeServiceGrpc;
 
-  constructor(@Inject('COMPUTE_PACKAGE') private client: ClientGrpc) { }
+  constructor(@Inject('COMPUTE_PACKAGE') private client: ClientGrpc) {}
 
   onModuleInit() {
     // Получаем gRPC-сервис по имени из proto ('ComputeService')
     this.computeService = this.client.getService<ComputeServiceGrpc>('ComputeService');
   }
 
-  async runComputation(algorithm: string, graphData: any) {
+  async runComputation(algorithm: string, graphData: any, target?: number) {
     // Вызываем метод Execute, который написан в Rust
     return this.computeService.execute({
       algorithm,
       graph: graphData,
       includeSteps: true,
+      target,
     });
   }
 }

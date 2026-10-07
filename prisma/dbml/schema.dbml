@@ -14,7 +14,7 @@ Table SavedGraph {
 
 Table Payment {
   id String [pk]
-  userId String [not null]
+  userId String [note: 'Null once the account was deleted: the payment is kept, anonymized, for accounting and disputes.']
   subscriptionId String
   subscription Subscription
   provider PaymentProvider [not null]
@@ -27,7 +27,7 @@ Table Payment {
   providerMetadata Json
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
-  user User [not null]
+  user User
   webhookEvents PaymentWebhookEvent [not null]
 }
 
@@ -74,6 +74,7 @@ Table User {
   id String [pk]
   email String [unique, not null]
   password String
+  emailVerifiedAt DateTime [note: 'Set once the user proved they own `email` (link sent by email, or Google sign-in).']
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
   sessions Session [not null]
@@ -98,10 +99,8 @@ Table PaymentWebhookEvent {
 
   Note: '*
  * Persistent idempotency key for webhook deliveries.
- *
  * A PSP may deliver the same event multiple times. This model ensures
  * each (provider, eventId) pair is processed exactly once.
- *
  * The `paymentId` column enables fast lookups when processing webhooks
  * but the canonical lookup is by (provider, eventId).'
 }
@@ -154,7 +153,7 @@ Ref: SavedGraph.userId > User.id [delete: Cascade]
 
 Ref: Payment.subscriptionId > Subscription.id [delete: Set Null]
 
-Ref: Payment.userId > User.id [delete: Cascade]
+Ref: Payment.userId > User.id [delete: Set Null]
 
 Ref: Subscription.userId - User.id [delete: Cascade]
 

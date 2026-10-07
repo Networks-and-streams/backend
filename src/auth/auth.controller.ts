@@ -1,3 +1,5 @@
+import { Lang } from '@/common/decorators/language.decorator';
+import type { Language } from '@/common/types/language';
 import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
@@ -51,9 +53,14 @@ export class AuthController {
   @ApiBody({ type: RegisterDto })
   @ApiOkResponse({ type: AuthTokensResponseDto, description: 'User registered successfully' })
   @ApiBadRequestResponse({ description: 'Validation error or email already exists' })
-  async register(@Res({ passthrough: true }) res: Response, @Req() req: Request, @Body() dto: RegisterDto) {
+  async register(
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
+    @Body() dto: RegisterDto,
+    @Lang() lang: Language,
+  ) {
     const meta = { ip: req.ip, userAgent: req.headers['user-agent'] };
-    const { accessToken, refreshToken } = await this.authService.register(dto, meta);
+    const { accessToken, refreshToken } = await this.authService.register(dto, meta, lang);
 
     this.cookieService.setRefreshToken(res, refreshToken);
 
