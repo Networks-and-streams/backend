@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { GraphDto } from '@/graph/dto/compute-request.dto';
+import { SavedGraphDataDto } from './saved-graph-data.dto';
 
 export class CreateSavedGraphDto {
   @ApiProperty({ example: 'Dijkstra test graph', description: 'Human-readable name of the saved graph' })
@@ -11,10 +11,10 @@ export class CreateSavedGraphDto {
   name!: string;
 
   @ApiProperty({
-    type: GraphDto,
+    type: SavedGraphDataDto,
     description: 'Reusable graph definition (same format as the compute endpoint)',
   })
   @ValidateNested()
-  @Type(() => GraphDto)
-  graph!: GraphDto;
+  @Type(() => SavedGraphDataDto)
+  graph!: SavedGraphDataDto;
 }

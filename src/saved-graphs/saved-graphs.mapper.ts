@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { SavedGraph } from '@/generated/prisma/client';
-import { GraphDto } from '@/graph/dto/compute-request.dto';
+import { SavedGraphDataDto } from './dto/saved-graph-data.dto';
 import { SavedGraphResponseDto } from './dto/saved-graph-response.dto';
 
 /**
@@ -14,7 +14,7 @@ export class SavedGraphsMapper {
     return {
       id: graph.id,
       name: graph.name,
-      graph: graph.graph as unknown as GraphDto,
+      graph: graph.graph as unknown as SavedGraphDataDto,
       createdAt: graph.createdAt,
       updatedAt: graph.updatedAt,
     };

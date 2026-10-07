@@ -1,22 +1,23 @@
 import { BadRequestException } from '@nestjs/common';
-import { GraphDto } from '@/graph/dto/compute-request.dto';
+import { MAX_METRIC_VALUE, SavedGraphDataDto } from './dto/saved-graph-data.dto';
 
 /**
  * Semantic graph validation used when persisting reusable graphs.
  *
- * The DTO layer (`GraphDto` / `EdgeDto`) guarantees the *shape* of the payload
+ * The DTO layer (`SavedGraphDataDto` / `EdgeDto`) guarantees the *shape* of the payload
  * (types and required fields). This helper enforces the *domain* rules that
  * the solver contract (compute/README.md + compute/graph.rs) relies on:
  *
  * - 1-indexed vertices, source within `1..vertices`
  * - edge endpoints reference existing vertices
  * - non-negative integer weights
+ * - optional extra edge parameters: unique keys, finite values for known keys
  *
  * Keeping this mirror of the solver's own validation here means a graph that
  * passes `POST /graphs` is guaranteed to be runnable by the compute service.
  */
 
-export function assertValidGraphData(graph: GraphDto): void {
+export function assertValidGraphData(graph: SavedGraphDataDto): void {
   const { vertices, edges, source } = graph;
 
   if (!Number.isInteger(vertices) || vertices < 1) {
@@ -25,6 +26,11 @@ export function assertValidGraphData(graph: GraphDto): void {
 
   if (!Number.isInteger(source) || source < 1 || source > vertices) {
     throw new BadRequestException('Graph is invalid: source must be an integer within 1..vertices');
+  }
+
+  const metricKeys = new Set((graph.metrics ?? []).map((metric) => metric.key));
+  if (metricKeys.size !== (graph.metrics ?? []).length) {
+    throw new BadRequestException('Graph is invalid: parameter keys in "metrics" must be unique');
   }
 
   if (!Array.isArray(edges)) {
@@ -40,6 +46,14 @@ export function assertValidGraphData(graph: GraphDto): void {
     }
     if (!Number.isInteger(edge.weight) || edge.weight < 0) {
       throw new BadRequestException('Graph is invalid: each edge "weight" must be a non-negative integer');
+    }
+    for (const [key, value] of Object.entries(edge.values ?? {})) {
+      if (!metricKeys.has(key)) {
+        throw new BadRequestException(`Graph is invalid: edge value "${key}" has no matching parameter in "metrics"`);
+      }
+      if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > MAX_METRIC_VALUE) {
+        throw new BadRequestException(`Graph is invalid: edge value "${key}" must be a finite number`);
+      }
     }
   }
 }
