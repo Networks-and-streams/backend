@@ -1,3 +1,4 @@
+import { MailModule } from './mail/mail.module';
 import { Module } from '@nestjs/common';
 import { PassportModule } from '@nestjs/passport';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -16,6 +17,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
     PassportModule,
     PrismaModule,
     RedisModule,
+    MailModule,
     EventEmitterModule.forRoot(),
     ClsModule.forRoot(clsModuleConfig),
     ThrottlerModule.forRoot(throttlerConfig),

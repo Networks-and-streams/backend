@@ -1,8 +1,9 @@
+import { ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { OAuthProvider } from '@/generated/prisma/client';
 
 import { OauthService } from './oauth.service';
-import { PrismaService } from '@/core/prisma';
+import { PrismaContextService } from '@/core/prisma';
 import { UsersService } from '@/users/users.service';
 import { AuthService } from '@/auth/auth.service';
 import type { NormalizedOAuthProfile } from './interfaces/normalized-oauth-profile.interface';
@@ -21,6 +22,7 @@ describe('OauthService', () => {
     findByEmail: jest.fn(),
     findByIdOrThrow: jest.fn(),
     createOAuthUser: jest.fn(),
+    claimUnverifiedAccount: jest.fn(),
   };
 
   const authServiceMock = {
@@ -31,6 +33,7 @@ describe('OauthService', () => {
     provider: OAuthProvider.GOOGLE,
     providerAccountId: 'google-uid-123',
     email: 'user@gmail.com',
+    emailVerified: true,
     firstName: 'John',
     lastName: 'Doe',
     avatar: 'https://photo.jpg',
@@ -44,7 +47,10 @@ describe('OauthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OauthService,
-        { provide: PrismaService, useValue: prismaMock },
+        {
+          provide: PrismaContextService,
+          useValue: { client: prismaMock, transaction: (cb: () => Promise<unknown>) => cb() },
+        },
         { provide: UsersService, useValue: usersServiceMock },
         { provide: AuthService, useValue: authServiceMock },
       ],
@@ -91,7 +97,7 @@ describe('OauthService', () => {
       });
 
       it('should link OAuth account and login when user with same email exists', async () => {
-        const existingUser = { id: 'existing-user-2', email: 'user@gmail.com' };
+        const existingUser = { id: 'existing-user-2', email: 'user@gmail.com', emailVerifiedAt: new Date() };
         usersServiceMock.findByEmail.mockResolvedValue(existingUser);
         prismaMock.oAuthAccount.create.mockResolvedValue({});
         authServiceMock.login.mockResolvedValue({ accessToken: 'access', refreshToken: 'refresh' });
@@ -114,6 +120,33 @@ describe('OauthService', () => {
         expect(result).toEqual({ accessToken: 'access', refreshToken: 'refresh' });
       });
 
+      it('takes over an unverified local account before linking (its password was never proven)', async () => {
+        usersServiceMock.findByEmail.mockResolvedValue({
+          id: 'u-unverified',
+          email: 'user@gmail.com',
+          emailVerifiedAt: null,
+        });
+        prismaMock.oAuthAccount.create.mockResolvedValue({});
+        authServiceMock.login.mockResolvedValue({ accessToken: 'access', refreshToken: 'refresh' });
+
+        await service.login(baseProfile, meta);
+
+        expect(usersServiceMock.claimUnverifiedAccount).toHaveBeenCalledWith('u-unverified');
+      });
+
+      it('refuses to link an existing account when Google has not verified the email', async () => {
+        usersServiceMock.findByEmail.mockResolvedValue({
+          id: 'u-1',
+          email: 'user@gmail.com',
+          emailVerifiedAt: new Date(),
+        });
+
+        await expect(service.login({ ...baseProfile, emailVerified: false }, meta)).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+        expect(prismaMock.oAuthAccount.create).not.toHaveBeenCalled();
+      });
+
       it('should create new OAuth user, link account, and login when no user exists', async () => {
         usersServiceMock.findByEmail.mockResolvedValue(null);
         const newUser = { id: 'new-user-1', email: 'user@gmail.com' };
@@ -128,6 +161,7 @@ describe('OauthService', () => {
           firstName: 'John',
           lastName: 'Doe',
           avatarUrl: 'https://photo.jpg',
+          emailVerified: true,
         });
         expect(prismaMock.oAuthAccount.create).toHaveBeenCalledWith({
           data: {
@@ -170,6 +204,7 @@ describe('OauthService', () => {
           firstName: null,
           lastName: null,
           avatarUrl: null,
+          emailVerified: true,
         });
       });
     });

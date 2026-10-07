@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { OAuthProvider } from '@/generated/prisma/client';
 
 import { PrismaContextService } from '@/core/prisma';
@@ -32,6 +32,16 @@ export class OauthService {
 
     const existingUser = await this.usersService.findByEmail(profile.email);
 
+    // Linking by email is only safe when Google vouches for the address.
+    if (existingUser && !profile.emailVerified) {
+      throw new ForbiddenException('Your Google email is not verified, so it cannot be linked to an existing account');
+    }
+    // An unverified local account may have been registered by someone else
+    // with this address: drop that password and its sessions before linking.
+    if (existingUser && !existingUser.emailVerifiedAt) {
+      await this.usersService.claimUnverifiedAccount(existingUser.id);
+    }
+
     const user = existingUser ?? (await this.createOAuthUser(profile));
 
     await this.linkOAuthAccount(user.id, profile);
@@ -55,6 +65,7 @@ export class OauthService {
       firstName: profile.firstName,
       lastName: profile.lastName,
       avatarUrl: profile.avatar,
+      emailVerified: profile.emailVerified,
     });
   }
 

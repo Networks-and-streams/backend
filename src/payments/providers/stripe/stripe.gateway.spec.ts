@@ -234,6 +234,60 @@ describe('StripeGateway', () => {
       expect(result.status).toBe('failed');
     });
 
+    it('accepts the flat { type, token } payload produced by the frontend', async () => {
+      const { gateway, stripeMock } = makeGateway();
+
+      stripeMock.paymentMethods.create.mockResolvedValue({ id: 'pm_flat', type: 'card' });
+      stripeMock.paymentIntents.create.mockResolvedValue({ id: 'pi_flat', status: 'succeeded', metadata: {} });
+
+      const result = await gateway.processGooglePay({
+        ...googlePayRequest,
+        tokenData: { type: 'PAYMENT_GATEWAY', token: 'tok_flat' },
+      });
+
+      expect(stripeMock.paymentMethods.create).toHaveBeenCalledWith({
+        type: 'card',
+        card: { token: 'tok_flat' },
+      });
+      expect(result.status).toBe('succeeded');
+    });
+
+    it('maps a Stripe card decline to a failed result instead of throwing', async () => {
+      const { gateway, stripeMock } = makeGateway();
+
+      stripeMock.paymentMethods.create.mockResolvedValue({ id: 'pm_declined', type: 'card' });
+      stripeMock.paymentIntents.create.mockRejectedValue(
+        Object.assign(new Error('Your card was declined.'), {
+          type: 'StripeCardError',
+          code: 'card_declined',
+        }),
+      );
+
+      const result = await gateway.processGooglePay({
+        ...googlePayRequest,
+        tokenData: { type: 'PAYMENT_GATEWAY', token: 'tok_declined' },
+      });
+
+      expect(result.status).toBe('failed');
+      expect(result.failureReason).toContain('declined');
+    });
+
+    it('maps a Stripe invalid-request error to a failed result', async () => {
+      const { gateway, stripeMock } = makeGateway();
+
+      stripeMock.paymentMethods.create.mockRejectedValue(
+        Object.assign(new Error('No such token: tok_bad'), { type: 'StripeInvalidRequestError' }),
+      );
+
+      const result = await gateway.processGooglePay({
+        ...googlePayRequest,
+        tokenData: { type: 'PAYMENT_GATEWAY', token: 'tok_bad' },
+      });
+
+      expect(result.status).toBe('failed');
+      expect(result.failureReason).toContain('No such token');
+    });
+
     it('propagates Stripe errors for the service layer to handle', async () => {
       const { gateway, stripeMock } = makeGateway();
 

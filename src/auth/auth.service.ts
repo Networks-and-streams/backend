@@ -12,6 +12,8 @@ import jwtConfig from '@/config/loaders/jwt.config';
 
 import { UsersService } from '@/users/users.service';
 import { SessionsService } from '@/sessions/sessions.service';
+import { AccountEmailService } from '@/users/account-email.service';
+import { DEFAULT_LANGUAGE, type Language } from '@/common/types/language';
 import { TokenService } from './services/token.service';
 
 import { RegisterDto } from './dto/register.dto';
@@ -28,6 +30,7 @@ export class AuthService {
     private readonly tokenService: TokenService,
     private readonly usersService: UsersService,
     private readonly sessionsService: SessionsService,
+    private readonly accountEmail: AccountEmailService,
 
     @Inject(jwtConfig.KEY) private readonly jwt: ConfigType<typeof jwtConfig>,
   ) {}
@@ -98,7 +101,7 @@ export class AuthService {
     this.logger.log('User logged out');
   }
 
-  async register(dto: RegisterDto, meta: SessionMetadata) {
+  async register(dto: RegisterDto, meta: SessionMetadata, lang: Language = DEFAULT_LANGUAGE) {
     const existingUser = await this.usersService.findByEmail(dto.email);
     if (existingUser) {
       this.logger.warn(`Registration attempt with existing email: ${dto.email}`);
@@ -107,6 +110,11 @@ export class AuthService {
 
     const user = await this.usersService.create(dto.email, dto.password);
     this.logger.log(`User ${user.id} registered with email ${dto.email}`);
+
+    // A mail failure must not fail the registration; the user can resend from the profile.
+    await this.accountEmail
+      .sendVerification(user.id, lang)
+      .catch((error) => this.logger.error(`Could not send verification email to user ${user.id}`, error));
 
     return this.auth(user.id, user.email, meta);
   }

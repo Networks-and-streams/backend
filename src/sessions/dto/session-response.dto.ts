@@ -35,4 +35,7 @@ export class SessionResponseDto {
     format: 'date-time',
   })
   createdAt!: Date;
+
+  @ApiProperty({ description: 'True for the session making this request (this device)' })
+  current!: boolean;
 }

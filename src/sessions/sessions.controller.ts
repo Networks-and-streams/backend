@@ -14,7 +14,6 @@ import { SessionsMapper } from '@/sessions/sessions.mapper';
 import { SessionResponseDto } from './dto/session-response.dto';
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
 import type { JwtUser } from '@/common/types/jwt-payload.type';
-import { RefreshToken } from './decorators/refresh-token.decorator';
 
 @ApiTags('Auth / Active Devices')
 @ApiBearerAuth('JWT-auth')
@@ -36,7 +35,7 @@ export class SessionsController {
   @ApiOkResponse({ type: [SessionResponseDto], description: 'List of active sessions returned successfully' })
   async getMySessions(@CurrentUser() user: JwtUser) {
     const sessions = await this.sessionsService.findAllUserSessions(user.id);
-    return this.sessionsMapper.toResponses(sessions);
+    return this.sessionsMapper.toResponses(sessions, user.sid);
   }
 
   @Delete(':id')
@@ -61,12 +60,12 @@ export class SessionsController {
   @ApiOperation({
     summary: 'Terminate all sessions except the current one',
     description:
-      'Terminates all active sessions for the authenticated user except the current session. ' +
-      'The current session is identified by the provided refresh token. ' +
+      'Terminates all active sessions for the authenticated user except the current session ' +
+      '(identified by the session id in the access token). ' +
       'Returns no content on success. Requires a valid JWT access token.',
   })
   @ApiOkResponse({ description: 'All other sessions terminated successfully' })
-  terminateOtherSessions(@CurrentUser() user: JwtUser, @RefreshToken() refreshToken: string) {
-    return this.sessionsService.removeOtherUserSessions(user.id, refreshToken);
+  terminateOtherSessions(@CurrentUser() user: JwtUser) {
+    return this.sessionsService.removeAllExcept(user.id, user.sid);
   }
 }

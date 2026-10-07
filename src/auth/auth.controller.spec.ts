@@ -67,9 +67,9 @@ describe('AuthController', () => {
       const dto = { email: 'test@example.com', password: 'password123' };
       authServiceMock.register.mockResolvedValue({ accessToken: 'access-token', refreshToken: 'refresh-token' });
 
-      const result = await controller.register(res, req, dto as never);
+      const result = await controller.register(res, req, dto as never, 'en');
 
-      expect(authServiceMock.register).toHaveBeenCalledWith(dto, { ip: '127.0.0.1', userAgent: 'test-agent' });
+      expect(authServiceMock.register).toHaveBeenCalledWith(dto, { ip: '127.0.0.1', userAgent: 'test-agent' }, 'en');
       expect(cookieServiceMock.setRefreshToken).toHaveBeenCalledWith(res, 'refresh-token');
       expect(result).toEqual({ accessToken: 'access-token' });
     });
@@ -80,9 +80,9 @@ describe('AuthController', () => {
       const dto = { email: 'a@b.com', password: 'pass123' };
       authServiceMock.register.mockResolvedValue({ accessToken: 'at', refreshToken: 'rt' });
 
-      await controller.register(res, req, dto as never);
+      await controller.register(res, req, dto as never, 'en');
 
-      expect(authServiceMock.register).toHaveBeenCalledWith(dto, { ip: undefined, userAgent: 'test-agent' });
+      expect(authServiceMock.register).toHaveBeenCalledWith(dto, { ip: undefined, userAgent: 'test-agent' }, 'en');
     });
   });
 
