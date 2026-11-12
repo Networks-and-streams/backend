@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { SessionsService } from './sessions.service';
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { PrismaContextService } from '@/core/prisma';
 
 function createMockPrismaService() {
   return {
@@ -19,6 +19,14 @@ function createMockPrismaService() {
   };
 }
 
+/** Test double for PrismaContextService: exposes the mock as the ambient client. */
+function createMockPrismaContext(prisma: ReturnType<typeof createMockPrismaService>) {
+  return {
+    client: prisma,
+    transaction: (fn: () => Promise<unknown>) => fn(),
+  };
+}
+
 describe('SessionsService', () => {
   let service: SessionsService;
   let prisma: ReturnType<typeof createMockPrismaService>;
@@ -27,7 +35,7 @@ describe('SessionsService', () => {
     prisma = createMockPrismaService();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SessionsService, { provide: PrismaService, useValue: prisma }],
+      providers: [SessionsService, { provide: PrismaContextService, useValue: createMockPrismaContext(prisma) }],
     }).compile();
 
     service = module.get<SessionsService>(SessionsService);

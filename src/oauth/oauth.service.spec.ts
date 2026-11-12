@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { OAuthProvider } from '@/generated/prisma/client';
 
 import { OauthService } from './oauth.service';
-import { PrismaService } from '@/core/prisma';
+import { PrismaContextService } from '@/core/prisma';
 import { UsersService } from '@/users/users.service';
 import { AuthService } from '@/auth/auth.service';
 import type { NormalizedOAuthProfile } from './interfaces/normalized-oauth-profile.interface';
@@ -44,7 +44,11 @@ describe('OauthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         OauthService,
-        { provide: PrismaService, useValue: prismaMock },
+        // Test double for PrismaContextService: the mock exposes the ambient client.
+        {
+          provide: PrismaContextService,
+          useValue: { client: prismaMock, transaction: (fn: () => Promise<unknown>) => fn() },
+        },
         { provide: UsersService, useValue: usersServiceMock },
         { provide: AuthService, useValue: authServiceMock },
       ],

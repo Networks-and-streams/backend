@@ -1,9 +1,30 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { PrismaContextService } from '@/core/prisma';
 import { SubscriptionPlan, SubscriptionStatus } from '@/generated/prisma/client';
 jest.mock('bcrypt');
+
+/**
+ * Test double for PrismaContextService: `client` resolves to the transaction
+ * client while `transaction()` is running, otherwise to the root mock — the
+ * same ambient-transaction behaviour the real CLS-based service provides.
+ */
+function createMockPrismaContext(prisma: { $transaction: jest.Mock }) {
+  let txClient: unknown = null;
+  return {
+    get client() {
+      return txClient ?? prisma;
+    },
+    transaction: (fn: () => Promise<unknown>) =>
+      prisma.$transaction((tx: unknown) => {
+        txClient = tx;
+        return Promise.resolve(fn()).finally(() => {
+          txClient = null;
+        });
+      }),
+  };
+}
 
 function createMockTx() {
   return {
@@ -45,7 +66,7 @@ describe('UsersService', () => {
     prisma = createMockPrismaService();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [UsersService, { provide: PrismaContextService, useValue: createMockPrismaContext(prisma) }],
     }).compile();
 
     service = module.get<UsersService>(UsersService);

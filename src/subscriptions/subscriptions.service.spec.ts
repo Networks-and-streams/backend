@@ -3,7 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 
 import { SubscriptionPlan, SubscriptionStatus } from '@/generated/prisma/client';
 
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { PrismaContextService } from '@/core/prisma';
 import { SubscriptionsService, SUBSCRIPTION_DURATION_MS } from './subscriptions.service';
 
 function createMockPrisma() {
@@ -12,6 +12,14 @@ function createMockPrisma() {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
+  };
+}
+
+/** Test double for PrismaContextService: exposes the mock as the ambient client. */
+function createMockPrismaContext(prisma: ReturnType<typeof createMockPrisma>) {
+  return {
+    client: prisma,
+    transaction: (fn: () => Promise<unknown>) => fn(),
   };
 }
 
@@ -34,7 +42,7 @@ describe('SubscriptionsService', () => {
     prisma = createMockPrisma();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SubscriptionsService, { provide: PrismaService, useValue: prisma }],
+      providers: [SubscriptionsService, { provide: PrismaContextService, useValue: createMockPrismaContext(prisma) }],
     }).compile();
 
     service = module.get<SubscriptionsService>(SubscriptionsService);
@@ -97,7 +105,7 @@ describe('SubscriptionsService', () => {
     it('sets ACTIVE with startedAt/expiresAt and the paid plan', async () => {
       prisma.subscription.update.mockResolvedValue({ ...baseSubscription, status: SubscriptionStatus.ACTIVE });
 
-      await service.activate('user-1', SubscriptionPlan.PREMIUM, undefined);
+      await service.activate('user-1', SubscriptionPlan.PREMIUM);
 
       expect(prisma.subscription.update).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
@@ -114,12 +122,18 @@ describe('SubscriptionsService', () => {
       expect(callArg.data.expiresAt.getTime() - callArg.data.startedAt.getTime()).toBe(SUBSCRIPTION_DURATION_MS);
     });
 
-    it('uses the provided transaction client when one is given', async () => {
-      const txPrisma = { subscription: { update: jest.fn().mockResolvedValue({}) } };
-      await service.activate('user-1', SubscriptionPlan.PREMIUM, txPrisma as never);
+    it('routes the update through the context client (no explicit transaction argument)', async () => {
+      // Transactions are handled inside PrismaContextService (CLS), so the
+      // service method takes only (userId, plan) and uses the ambient client.
+      prisma.subscription.update.mockResolvedValue({ ...baseSubscription, status: SubscriptionStatus.ACTIVE });
 
-      expect(txPrisma.subscription.update).toHaveBeenCalledTimes(1);
-      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      await service.activate('user-1', SubscriptionPlan.PREMIUM);
+
+      expect(prisma.subscription.update).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+        data: expect.objectContaining({ status: SubscriptionStatus.ACTIVE }),
+      });
+      expect(service.activate).toHaveLength(2);
     });
   });
 
