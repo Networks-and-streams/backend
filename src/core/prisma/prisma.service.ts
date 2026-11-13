@@ -8,14 +8,15 @@ import { PrismaClient } from '@/generated/prisma/client';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
+  /** Kept so shutdown can drain the pool too — `$disconnect` alone leaves idle clients alive. */
+  private readonly pool: Pool;
 
   constructor(@Inject(databaseConfig.KEY) private readonly config: ConfigType<typeof databaseConfig>) {
-    const adapter = new PrismaPg(
-      new Pool({
-        connectionString: config.url,
-      }),
-    );
-    super({ adapter });
+    const pool = new Pool({
+      connectionString: config.url,
+    });
+    super({ adapter: new PrismaPg(pool) });
+    this.pool = pool;
   }
 
   async onModuleInit() {
@@ -25,6 +26,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   async onModuleDestroy() {
     await this.$disconnect();
+    await this.pool.end();
     this.logger.log('Database disconnected');
   }
 }

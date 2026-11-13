@@ -3,6 +3,7 @@
   "rootDir": "..",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
+  "setupFiles": ["<rootDir>/test/setup-env.ts"],
   "transform": {
     "^.+\\.(t|j)s$": [
       "@swc/jest",
@@ -14,8 +15,21 @@
         },
         "module": { "type": "commonjs" }
       }
+    ],
+    "^.+\\.mjs$": [
+      "@swc/jest",
+      {
+        "jsc": {
+          "parser": { "syntax": "ecmascript" },
+          "target": "es2022"
+        },
+        "module": { "type": "commonjs" }
+      }
     ]
   },
+  "transformIgnorePatterns": [
+    "/node_modules/(?!.*\\.mjs$)"
+  ],
   "moduleNameMapper": {
     "^(\\..+)\\.js$": "$1",
     "^@/(.*)$": "<rootDir>/src/$1",

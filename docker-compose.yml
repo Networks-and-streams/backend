@@ -37,6 +37,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  compute:
+    build: ../compute
+    restart: unless-stopped
+    expose:
+      - "50051"
+    environment:
+      COMPUTE_ADDR: "0.0.0.0:50051"
+
 volumes:
   db_data:
   redis-data:

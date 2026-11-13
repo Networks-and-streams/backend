@@ -8,6 +8,8 @@ import { SessionsModule } from './sessions/sessions.module';
 import { OauthModule } from './oauth/oauth.module';
 import { PaymentsModule } from './payments/payments.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { SavedGraphsModule } from './saved-graphs/saved-graphs.module';
+import { GraphModule } from './graph/graph.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     // Domain
     SubscriptionsModule,
     PaymentsModule,
+    SavedGraphsModule,
+    GraphModule,
   ],
 })
 export class AppModule {}
