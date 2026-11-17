@@ -20,13 +20,27 @@ import { PAYMENT_GATEWAY } from './payment.gateway';
 import type { PaymentGateway } from './payment.gateway';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { GooglePayDto } from './dto/google-pay.dto';
-import { canTransitionPayment, getPlanPricing, WEBHOOK_STATUS_TO_PAYMENT_STATUS } from './payment.types';
+import { PaymentConfigResponseDto } from './dto/payment-config-response.dto';
+import {
+  canTransitionPayment,
+  getPlanPricing,
+  isTerminalPaymentStatus,
+  WEBHOOK_STATUS_TO_PAYMENT_STATUS,
+} from './payment.types';
+import type { VerifyPaymentResult } from './payment.types';
 
 const PAYMENT_PROVIDER_FROM_CONFIG: Record<string, PaymentProvider> = {
   stripe: PaymentProvider.STRIPE,
   liqpay: PaymentProvider.LIQPAY,
   wayforpay: PaymentProvider.WAYFORPAY,
 };
+
+/**
+ * Minimum age (ms) a non-terminal payment must reach before `GET /payments/:id`
+ * reconciles it with the PSP. Keeps client polling from turning into one
+ * PSP round-trip per request (plan §5.6 — desktop has no webhooks).
+ */
+const PSP_RECONCILE_AFTER_MS = 5_000;
 
 @Injectable()
 export class PaymentsService {
@@ -39,6 +53,18 @@ export class PaymentsService {
     @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGateway,
     @Inject(paymentConfig.KEY) private readonly payment: ConfigType<typeof paymentConfig>,
   ) {}
+
+  /**
+   * Client-facing payment configuration (GET /payments/config).
+   *
+   * Lets the frontend offer the right payment affordance: in
+   * `PAYMENTS_TEST_MODE` (desktop manual QA) it shows the "Test purchase"
+   * button instead of a Google Pay button that cannot work without a real
+   * merchant account. Exposes a capability flag only — never secrets.
+   */
+  getClientConfig(): PaymentConfigResponseDto {
+    return { testMode: this.payment.testMode === true };
+  }
 
   /**
    * Creates a PENDING payment for the authenticated user.
@@ -86,13 +112,77 @@ export class PaymentsService {
   /**
    * Returns a payment owned by the given user. Other users' payments are
    * indistinguishable from non-existent payments (404).
+   *
+   * Desktop note (plan §5.6): an ordinary user cannot receive PSP webhooks, so
+   * a stale non-terminal payment is reconciled with the PSP right here, while
+   * the client polls `GET /payments/:id`. Terminal payments (and reads inside
+   * the reconcile window) are served from the DB only.
    */
   async getPayment(userId: string, paymentId: string): Promise<Payment> {
     const payment = await this.db.client.payment.findFirst({ where: { id: paymentId, userId } });
     if (!payment) {
       throw new NotFoundException('Payment not found');
     }
-    return payment;
+    return this.reconcileWithPsp(payment);
+  }
+
+  /**
+   * Polls the PSP for the authoritative status of a non-terminal payment and
+   * applies it exactly like a webhook delivery (status + subscription
+   * activation, race-guarded). Never throws: a read must not fail because the
+   * PSP is unreachable — the next poll (or a real webhook) remains the source
+   * of truth.
+   */
+  private async reconcileWithPsp(payment: Payment): Promise<Payment> {
+    if (isTerminalPaymentStatus(payment.status)) {
+      return payment;
+    }
+    if (!payment.providerPaymentId) {
+      // Nothing to look up yet — the provider reference is attached after the
+      // client submits the payment (e.g. Google Pay) or via the webhook.
+      return payment;
+    }
+    if (Date.now() - payment.updatedAt.getTime() < PSP_RECONCILE_AFTER_MS) {
+      return payment;
+    }
+
+    let verification: VerifyPaymentResult;
+    try {
+      verification = await this.gateway.verifyPayment({ providerPaymentId: payment.providerPaymentId });
+    } catch (error) {
+      this.logger.warn(`PSP status check failed for payment ${payment.id}: ${(error as Error).message}`);
+      return payment;
+    }
+
+    const newStatus = WEBHOOK_STATUS_TO_PAYMENT_STATUS[verification.status];
+    if (!newStatus || newStatus === payment.status || !canTransitionPayment(payment.status, newStatus)) {
+      return payment;
+    }
+
+    await this.db.transaction(async () => {
+      const current = await this.db.client.payment.findUnique({ where: { id: payment.id } });
+      // Guard against a concurrent webhook/poll having moved it already.
+      if (!current || current.status !== payment.status) {
+        this.logger.log(`Payment ${payment.id} raced with another update — skipped`);
+        return;
+      }
+
+      await this.db.client.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: newStatus,
+          providerMetadata: (verification.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
+        },
+      });
+
+      if (newStatus === PaymentStatus.SUCCEEDED && payment.subscriptionId) {
+        await this.subscriptionsService.activate(payment.userId, payment.plan);
+        this.logger.log(`Subscription ${payment.subscriptionId} activated after PSP poll for ${payment.id}`);
+      }
+    });
+
+    this.logger.log(`Payment ${payment.id} reconciled with PSP: ${payment.status} -> ${newStatus}`);
+    return this.getPaymentById(payment.id);
   }
 
   /**

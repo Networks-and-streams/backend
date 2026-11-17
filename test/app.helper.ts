@@ -1,9 +1,11 @@
 import cookieParser from 'cookie-parser';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ExpressAdapter } from '@nestjs/platform-express';
 import request from 'supertest';
 
 import { AppModule } from '@/app.module';
+import { setupApiPrefix } from '@/bootstrap/setup-api-prefix';
 import { setupPipes } from '@/bootstrap/setup-pipes';
 import { setupInterceptors } from '@/bootstrap/setup-interceptors';
 
@@ -31,9 +33,28 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<INest
     process.env.COMPUTE_ADDR = DEFAULT_COMPUTE_ADDR;
   }
 
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const builder = Test.createTestingModule({ imports: [AppModule] });
 
-  const app = moduleRef.createNestApplication();
+  // Desktop mode: @nestjs/serve-static chooses its loader (Express vs no-op)
+  // while providers are instantiated — during compile(). The testing builder
+  // only assigns the HTTP adapter later, in createNestApplication(), so the
+  // factory would see no adapter and silently install NoopLoader (the SPA
+  // would never be served). NestFactory sets the adapter before instantiation,
+  // which is why production works — mirror that order here.
+  let httpAdapter: ExpressAdapter | undefined;
+  if (process.env.SERVE_STATIC_DIR) {
+    httpAdapter = new ExpressAdapter();
+    const withContainer = builder as unknown as { container: { setHttpAdapter: (adapter: ExpressAdapter) => void } };
+    withContainer.container.setHttpAdapter(httpAdapter);
+  }
+
+  const moduleRef = await builder.compile();
+
+  const app = httpAdapter ? moduleRef.createNestApplication(httpAdapter) : moduleRef.createNestApplication();
+  // Desktop single-port mode (mirrors bootstrap/app.ts).
+  if (process.env.SERVE_STATIC_DIR) {
+    setupApiPrefix(app);
+  }
   app.use(cookieParser());
   setupPipes(app);
   setupInterceptors(app);

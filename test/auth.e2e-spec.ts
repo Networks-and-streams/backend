@@ -133,4 +133,30 @@ describe('Auth API (e2e)', () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.body.accessToken).toBeUndefined();
   });
+
+  it('logs out from all devices → 200 and revokes every session (§5.6)', async () => {
+    // Fresh account so the earlier logout in this suite cannot interfere.
+    const otherEmail = uniqueEmail('auth-all');
+    const reg = await http(app).post('/auth/register').send({ email: otherEmail, password });
+    expect(reg.status).toBe(201);
+
+    const otherAccess = reg.body.accessToken;
+    const otherRefresh = refreshCookieFrom(reg);
+
+    const res = await http(app)
+      .post('/auth/logout-all')
+      .set(bearer(otherAccess))
+      .set('Cookie', [`refreshToken=${otherRefresh}`]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toContain('logged out');
+    expect(setCookiesFrom(res).some((c) => c.startsWith('refreshToken=;'))).toBe(true);
+
+    // The cookie is dead afterwards — same guarantee as plain logout.
+    const refresh = await http(app)
+      .post('/auth/refresh')
+      .set('Cookie', [`refreshToken=${otherRefresh}`]);
+    expect(refresh.status).toBeGreaterThanOrEqual(400);
+    expect(refresh.body.accessToken).toBeUndefined();
+  });
 });

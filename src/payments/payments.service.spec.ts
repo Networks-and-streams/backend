@@ -133,6 +133,7 @@ const paymentConfigMock = {
   defaultCurrency: 'USD',
   webhookSecret: 'test-webhook-secret',
   googlePayMerchantId: 'merchant-1',
+  testMode: false,
 };
 
 /* ---------------------------------------------------------------- */
@@ -163,6 +164,39 @@ describe('PaymentsService', () => {
 
     service = module.get<PaymentsService>(PaymentsService);
     jest.clearAllMocks();
+  });
+
+  describe('client configuration (GET /payments/config)', () => {
+    async function buildServiceWith(testMode: boolean): Promise<PaymentsService> {
+      const module = await Test.createTestingModule({
+        providers: [
+          PaymentsService,
+          { provide: PrismaContextService, useValue: createMockPrismaContext(prisma) },
+          { provide: SubscriptionsService, useValue: subscriptions },
+          { provide: PAYMENT_GATEWAY, useValue: gateway },
+          { provide: paymentConfig.KEY, useValue: { ...paymentConfigMock, testMode } },
+        ],
+      }).compile();
+      return module.get<PaymentsService>(PaymentsService);
+    }
+
+    it('reports test mode off when the flag is disabled', async () => {
+      const configured = await buildServiceWith(false);
+
+      expect(configured.getClientConfig()).toEqual({ testMode: false });
+    });
+
+    it('reports test mode on when PAYMENTS_TEST_MODE is enabled', async () => {
+      const configured = await buildServiceWith(true);
+
+      expect(configured.getClientConfig()).toEqual({ testMode: true });
+    });
+
+    it('exposes a capability flag only — never secrets', async () => {
+      const configured = await buildServiceWith(true);
+
+      expect(Object.keys(configured.getClientConfig())).toEqual(['testMode']);
+    });
   });
 
   describe('payment creation', () => {
@@ -237,6 +271,75 @@ describe('PaymentsService', () => {
       prisma.payment.findFirst.mockResolvedValue(null);
 
       await expect(service.getPayment('user-1', 'does-not-exist')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('PSP reconciliation on read (desktop polling, §5.6)', () => {
+    const stalePayment = {
+      ...basePayment,
+      status: PaymentStatus.PROCESSING,
+      providerPaymentId: 'pi_123',
+      updatedAt: new Date(Date.now() - 60_000),
+    };
+
+    it('syncs a stale non-terminal payment with the PSP and activates on success', async () => {
+      prisma.payment.findFirst.mockResolvedValue(stalePayment);
+      // Race guard + update run inside the transaction (tx client);
+      // the final read runs against the root client.
+      tx.payment.findUnique.mockResolvedValue(stalePayment);
+      tx.payment.update.mockResolvedValue({ ...stalePayment, status: PaymentStatus.SUCCEEDED });
+      prisma.payment.findUnique.mockResolvedValue({ ...stalePayment, status: PaymentStatus.SUCCEEDED });
+      gateway.verifyPayment.mockResolvedValue({ status: 'succeeded', metadata: { stripePaymentIntentId: 'pi_123' } });
+
+      const result = await service.getPayment('user-1', 'pay-1');
+
+      expect(gateway.verifyPayment).toHaveBeenCalledWith({ providerPaymentId: 'pi_123' });
+      expect(tx.payment.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pay-1' },
+          data: expect.objectContaining({ status: PaymentStatus.SUCCEEDED }),
+        }),
+      );
+      expect(subscriptions.activate).toHaveBeenCalledWith('user-1', SubscriptionPlan.PREMIUM);
+      expect(result.status).toBe(PaymentStatus.SUCCEEDED);
+    });
+
+    it('does not hit the PSP inside the reconcile window', async () => {
+      prisma.payment.findFirst.mockResolvedValue({ ...stalePayment, updatedAt: new Date() });
+
+      const result = await service.getPayment('user-1', 'pay-1');
+
+      expect(gateway.verifyPayment).not.toHaveBeenCalled();
+      expect(tx.payment.update).not.toHaveBeenCalled();
+      expect(result.status).toBe(PaymentStatus.PROCESSING);
+    });
+
+    it('never queries the PSP for a terminal payment', async () => {
+      prisma.payment.findFirst.mockResolvedValue({ ...basePayment, status: PaymentStatus.SUCCEEDED });
+
+      const result = await service.getPayment('user-1', 'pay-1');
+
+      expect(gateway.verifyPayment).not.toHaveBeenCalled();
+      expect(result.status).toBe(PaymentStatus.SUCCEEDED);
+    });
+
+    it('skips the lookup when no provider reference is attached yet', async () => {
+      prisma.payment.findFirst.mockResolvedValue({ ...stalePayment, providerPaymentId: null });
+
+      await service.getPayment('user-1', 'pay-1');
+
+      expect(gateway.verifyPayment).not.toHaveBeenCalled();
+    });
+
+    it('serves the DB state when the PSP is unreachable (read never fails)', async () => {
+      prisma.payment.findFirst.mockResolvedValue(stalePayment);
+      gateway.verifyPayment.mockRejectedValue(new Error('network down'));
+
+      const result = await service.getPayment('user-1', 'pay-1');
+
+      expect(result.status).toBe(PaymentStatus.PROCESSING);
+      expect(tx.payment.update).not.toHaveBeenCalled();
+      expect(subscriptions.activate).not.toHaveBeenCalled();
     });
   });
 

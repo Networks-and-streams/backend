@@ -17,6 +17,7 @@ import { PaymentsService } from './payments.service';
 import { PaymentsMapper } from './payments.mapper';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { GooglePayDto } from './dto/google-pay.dto';
+import { PaymentConfigResponseDto } from './dto/payment-config-response.dto';
 import { PaymentResponseDto } from './dto/payment-response.dto';
 
 import { CurrentUser } from '@/common/decorators/current-user.decorator';
@@ -49,6 +50,21 @@ export class PaymentsController {
     return this.paymentsMapper.toResponse(payment);
   }
 
+  // Literal path — must stay declared BEFORE `@Get(':id')` so it is not
+  // captured as a payment id (Nest registers routes in declaration order).
+  @Public()
+  @Get('config')
+  @ApiOperation({
+    summary: 'Payment configuration for the client',
+    description:
+      'Tells the client how payments behave in this deployment (e.g. PAYMENTS_TEST_MODE on the ' +
+      'desktop build), so the UI can offer the matching payment flow. Public: capability flags only, no secrets.',
+  })
+  @ApiOkResponse({ type: PaymentConfigResponseDto, description: 'Payment configuration' })
+  getPaymentConfig(): PaymentConfigResponseDto {
+    return this.paymentsService.getClientConfig();
+  }
+
   @Get(':id')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
@@ -66,6 +82,10 @@ export class PaymentsController {
   }
 
   @Post(':id/google-pay')
+  // Explicit200: this is an action on an existing payment, not the creation
+  // of a resource (Nest would otherwise default POST to 201 — which
+  // contradicted the documented ApiOkResponse).
+  @HttpCode(200)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Submit a Google Pay token for a payment',
