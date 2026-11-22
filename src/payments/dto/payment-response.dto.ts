@@ -6,7 +6,7 @@ export class PaymentResponseDto {
   id!: string;
 
   @ApiProperty({ description: 'Ownership user ID' })
-  userId!: string;
+  userId!: string | null;
 
   @ApiProperty({ description: 'Related subscription ID, if any', nullable: true })
   subscriptionId!: string | null;

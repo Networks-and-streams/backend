@@ -40,4 +40,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async del(key: string): Promise<void> {
     await this.client.del(key);
   }
+
+  /**
+   * Atomically increments a counter and returns the new value. The TTL is set
+   * only when the key has none yet, so repeated increments never extend it.
+   */
+  async incrWithTtl(key: string, ttlSeconds: number): Promise<number> {
+    const [value] = await this.client.multi().incr(key).expire(key, ttlSeconds, 'NX').exec();
+    return Number(value);
+  }
+
+  /** Reads and deletes a key atomically (single-use values such as tokens). */
+  async getDel(key: string): Promise<string | null> {
+    return this.client.getDel(key);
+  }
+
+  async decr(key: string): Promise<number> {
+    return this.client.decr(key);
+  }
 }

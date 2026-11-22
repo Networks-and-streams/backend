@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { UsersService } from './users.service';
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { PrismaContextService } from '@/core/prisma';
+import { SessionsService } from '@/sessions/sessions.service';
+import { BadRequestException } from '@nestjs/common';
 import { SubscriptionPlan, SubscriptionStatus } from '@/generated/prisma/client';
 jest.mock('bcrypt');
 
@@ -20,6 +22,7 @@ function createMockPrismaService() {
       findUnique: jest.fn(),
       findMany: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
       delete: jest.fn(),
     },
     subscription: {
@@ -32,6 +35,7 @@ function createMockPrismaService() {
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: ReturnType<typeof createMockPrismaService>;
+  const sessions = { removeAllExcept: jest.fn() };
 
   const baseUser = {
     id: '1',
@@ -45,7 +49,14 @@ describe('UsersService', () => {
     prisma = createMockPrismaService();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        UsersService,
+        {
+          provide: PrismaContextService,
+          useValue: { client: prisma, transaction: (cb: () => Promise<unknown>) => cb() },
+        },
+        { provide: SessionsService, useValue: sessions },
+      ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
@@ -189,6 +200,51 @@ describe('UsersService', () => {
       expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
       expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: '1' } });
       expect(result).toEqual(baseUser);
+    });
+  });
+
+  describe('changePassword', () => {
+    const compare = bcrypt.compare as jest.Mock;
+    const hash = bcrypt.hash as jest.Mock;
+
+    it('changes the password and signs out every other session', async () => {
+      prisma.user.findUnique.mockResolvedValue(baseUser);
+      compare.mockResolvedValueOnce(true).mockResolvedValueOnce(false); // current ok, new differs
+      hash.mockResolvedValue('new-hash');
+
+      await service.changePassword('1', 'session-1', { currentPassword: 'old', newPassword: 'new-pass' });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: '1' }, data: { password: 'new-hash' } });
+      expect(sessions.removeAllExcept).toHaveBeenCalledWith('1', 'session-1');
+    });
+
+    it('rejects a wrong current password with 400 and changes nothing', async () => {
+      prisma.user.findUnique.mockResolvedValue(baseUser);
+      compare.mockResolvedValueOnce(false);
+
+      await expect(
+        service.changePassword('1', 'session-1', { currentPassword: 'wrong', newPassword: 'new-pass' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(sessions.removeAllExcept).not.toHaveBeenCalled();
+    });
+
+    it('requires the current password when one is set', async () => {
+      prisma.user.findUnique.mockResolvedValue(baseUser);
+
+      await expect(service.changePassword('1', 'session-1', { newPassword: 'new-pass' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('lets a Google-only account set a first password without a current one', async () => {
+      prisma.user.findUnique.mockResolvedValue({ ...baseUser, password: null });
+      hash.mockResolvedValue('first-hash');
+
+      await service.changePassword('1', 'session-1', { newPassword: 'new-pass' });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: '1' }, data: { password: 'first-hash' } });
     });
   });
 });

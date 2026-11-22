@@ -41,6 +41,7 @@ describe('GoogleStrategy', () => {
         provider: OAuthProvider.GOOGLE,
         providerAccountId: 'google-uid-123',
         email: 'user@gmail.com',
+        emailVerified: false,
         firstName: 'John',
         lastName: 'Doe',
         avatar: 'https://lh3.googleusercontent.com/photo.jpg',

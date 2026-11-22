@@ -2,7 +2,9 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaContextService } from '@/core/prisma';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { UpdateSessionDto } from './dto/update-session.dto';
-import * as crypto from 'node:crypto';
+
+/** Devices (sessions) one account may be signed in on at the same time. */
+export const MAX_ACTIVE_SESSIONS = 3;
 
 @Injectable()
 export class SessionsService {
@@ -39,24 +41,6 @@ export class SessionsService {
     this.logger.log(`Session ${sessionId} terminated`);
   }
 
-  async removeOtherUserSessions(userId: string, currentRefreshToken?: string) {
-    const currentHash = currentRefreshToken
-      ? crypto.createHash('sha256').update(currentRefreshToken).digest('hex')
-      : undefined;
-
-    const result = await this.db.client.session.deleteMany({
-      where: {
-        userId,
-        NOT: currentHash
-          ? {
-              tokenHash: currentHash,
-            }
-          : undefined,
-      },
-    });
-    this.logger.log(`Removed ${result.count} other sessions for user ${userId}`);
-  }
-
   async findByIdOrThrow(id: string) {
     const session = await this.db.client.session.findUnique({ where: { id } });
 
@@ -84,7 +68,34 @@ export class SessionsService {
       },
     });
     this.logger.log(`Session ${session.id} created for user ${userId}`);
+    await this.enforceDeviceLimit(userId);
     return session;
+  }
+
+  /**
+   * Keeps at most {@link MAX_ACTIVE_SESSIONS} sessions per user: signing in on
+   * a new device signs out the least recently used one (rather than refusing
+   * the login, which could lock out a user who lost a device). Expired sessions
+   * are removed too. Concurrent logins converge: every caller keeps the same
+   * newest sessions.
+   */
+  private async enforceDeviceLimit(userId: string) {
+    const now = new Date();
+    const active = await this.db.client.session.findMany({
+      where: { userId, expiresAt: { gt: now } },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true },
+    });
+    const evictedIds = active.slice(MAX_ACTIVE_SESSIONS).map((session) => session.id);
+
+    const result = await this.db.client.session.deleteMany({
+      where: { userId, OR: [{ expiresAt: { lte: now } }, { id: { in: evictedIds } }] },
+    });
+    if (evictedIds.length > 0) {
+      this.logger.log(`Signed out ${evictedIds.length} least recently used session(s) for user ${userId}`);
+    } else if (result.count > 0) {
+      this.logger.log(`Removed ${result.count} expired session(s) for user ${userId}`);
+    }
   }
 
   findByTokenHash(tokenHash: string) {
@@ -114,6 +125,14 @@ export class SessionsService {
     await this.db.client.session.deleteMany({
       where: { tokenHash },
     });
+  }
+
+  /** Signs out every session of the user except `keepSessionId`. */
+  async removeAllExcept(userId: string, keepSessionId: string) {
+    const result = await this.db.client.session.deleteMany({
+      where: { userId, id: { not: keepSessionId } },
+    });
+    this.logger.log(`Removed ${result.count} other sessions for user ${userId}`);
   }
 
   async removeAllUserSessions(userId: string) {

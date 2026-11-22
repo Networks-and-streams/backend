@@ -83,9 +83,14 @@ export class StripeGateway implements PaymentGateway {
   async processGooglePay(request: ProcessGooglePayRequest): Promise<ProcessGooglePayResult> {
     const token = this.extractGooglePayToken(request.tokenData);
     if (!token) {
-      this.logger.warn('Invalid Google Pay token format — cannot extract token');
+      this.logger.warn(`Invalid Google Pay token payload for payment ${request.paymentId} — cannot extract token`);
       return { status: 'failed', failureReason: 'Invalid Google Pay token format' };
     }
+
+    this.logger.log(
+      `Processing Google Pay token via Stripe for payment ${request.paymentId} ` +
+        `(token kind: ${this.describeToken(token)})`,
+    );
 
     try {
       // Create a PaymentMethod from the Google Pay token.
@@ -105,12 +110,25 @@ export class StripeGateway implements PaymentGateway {
         },
       });
 
-      this.logger.log(`Stripe PaymentIntent confirmed: ${paymentIntent.id} (status: ${paymentIntent.status})`);
+      this.logger.log(
+        `Stripe PaymentIntent confirmed: ${paymentIntent.id} (status: ${paymentIntent.status}) ` +
+          `for payment ${request.paymentId}`,
+      );
 
       return this.mapPaymentIntentResult(paymentIntent);
     } catch (error) {
-      this.logger.error('Stripe Google Pay processing failed', error as Error);
-      throw error; // Let the service layer handle the error
+      // A decline / invalid token is a definitive failure for this attempt —
+      // surface the reason instead of a generic gateway error. Only unknown /
+      // transient errors are rethrown so the service keeps the payment
+      // PROCESSING and lets the Stripe webhook decide the final state.
+      if (this.isDefinitiveStripeFailure(error)) {
+        const reason = this.stripeErrorMessage(error);
+        this.logger.warn(`Google Pay payment ${request.paymentId} failed at Stripe: ${reason}`);
+        return { status: 'failed', failureReason: reason };
+      }
+
+      this.logger.error(`Stripe Google Pay processing error for payment ${request.paymentId}`, error as Error);
+      throw error; // Let the service layer handle the (transient) error
     }
   }
 
@@ -280,6 +298,34 @@ export class StripeGateway implements PaymentGateway {
       default:
         return 'failed';
     }
+  }
+
+  /** Classifies a token for log output without ever logging the token itself. */
+  private describeToken(token: string): string {
+    if (token.startsWith('tok_')) return 'stripe_token';
+    if (token.startsWith('pm_')) return 'payment_method';
+    if (token.startsWith('{')) return 'json';
+    return 'unknown';
+  }
+
+  /**
+   * True when Stripe returned an error that definitively fails this payment
+   * attempt (card declined, invalid/expired token, bad request) rather than a
+   * transient/connectivity error. Duck-typed on the Stripe error `type` so it
+   * also works with test doubles.
+   */
+  private isDefinitiveStripeFailure(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null) return false;
+    const type = (error as { type?: string }).type;
+    return type === 'StripeCardError' || type === 'StripeInvalidRequestError';
+  }
+
+  private stripeErrorMessage(error: unknown): string {
+    if (typeof error === 'object' && error !== null) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string' && message.length > 0) return message;
+    }
+    return 'The payment was declined.';
   }
 
   /**

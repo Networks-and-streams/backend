@@ -10,7 +10,7 @@ describe('SessionsController', () => {
   const mockSessionsService = {
     findAllUserSessions: jest.fn(),
     terminateSession: jest.fn(),
-    removeOtherUserSessions: jest.fn(),
+    removeAllExcept: jest.fn(),
   };
 
   const mockSessionsMapper = {
@@ -51,7 +51,7 @@ describe('SessionsController', () => {
       const result = await controller.getMySessions(user);
 
       expect(sessionsService.findAllUserSessions).toHaveBeenCalledWith('user-1');
-      expect(mockSessionsMapper.toResponses).toHaveBeenCalledWith(sessions);
+      expect(mockSessionsMapper.toResponses).toHaveBeenCalledWith(sessions, 'sid-1');
       expect(result).toEqual(mapped);
     });
   });
@@ -69,14 +69,13 @@ describe('SessionsController', () => {
   });
 
   describe('terminateOtherSessions', () => {
-    it('calls sessionsService.removeOtherUserSessions with user id and refresh token', async () => {
+    it('signs out every session except the current one (sid from the access token)', async () => {
       const user = { id: 'user-1', email: 'user@example.com', sid: 'sid-1' };
-      const refreshToken = 'refresh-token-value';
-      mockSessionsService.removeOtherUserSessions.mockResolvedValue(undefined);
+      mockSessionsService.removeAllExcept.mockResolvedValue(undefined);
 
-      const result = await controller.terminateOtherSessions(user, refreshToken);
+      const result = await controller.terminateOtherSessions(user);
 
-      expect(sessionsService.removeOtherUserSessions).toHaveBeenCalledWith('user-1', refreshToken);
+      expect(sessionsService.removeAllExcept).toHaveBeenCalledWith('user-1', 'sid-1');
       expect(result).toBeUndefined();
     });
   });

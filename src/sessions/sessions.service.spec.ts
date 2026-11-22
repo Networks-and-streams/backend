@@ -1,8 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
-import * as crypto from 'crypto';
-import { SessionsService } from './sessions.service';
-import { PrismaService } from '@/core/prisma/prisma.service';
+import { MAX_ACTIVE_SESSIONS, SessionsService } from './sessions.service';
+import { PrismaContextService } from '@/core/prisma';
 
 function createMockPrismaService() {
   return {
@@ -27,7 +26,13 @@ describe('SessionsService', () => {
     prisma = createMockPrismaService();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SessionsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        SessionsService,
+        {
+          provide: PrismaContextService,
+          useValue: { client: prisma, transaction: (cb: () => Promise<unknown>) => cb() },
+        },
+      ],
     }).compile();
 
     service = module.get<SessionsService>(SessionsService);
@@ -83,32 +88,14 @@ describe('SessionsService', () => {
     });
   });
 
-  describe('removeOtherUserSessions', () => {
-    it('calls deleteMany with NOT condition using hash when a token is provided', async () => {
-      const refreshToken = 'some-token';
-      const hashHex = crypto.createHash('sha256').update(refreshToken).digest('hex');
-      prisma.session.deleteMany.mockResolvedValue({ count: 1 });
+  describe('removeAllExcept', () => {
+    it('deletes every session of the user except the kept one', async () => {
+      prisma.session.deleteMany.mockResolvedValue({ count: 2 });
 
-      await service.removeOtherUserSessions('user-1', refreshToken);
+      await service.removeAllExcept('user-1', 'keep-me');
 
       expect(prisma.session.deleteMany).toHaveBeenCalledWith({
-        where: {
-          userId: 'user-1',
-          NOT: { tokenHash: hashHex },
-        },
-      });
-    });
-
-    it('calls deleteMany without NOT when no token is provided', async () => {
-      prisma.session.deleteMany.mockResolvedValue({ count: 0 });
-
-      await service.removeOtherUserSessions('user-1', undefined);
-
-      expect(prisma.session.deleteMany).toHaveBeenCalledWith({
-        where: {
-          userId: 'user-1',
-          NOT: undefined,
-        },
+        where: { userId: 'user-1', id: { not: 'keep-me' } },
       });
     });
   });
@@ -150,6 +137,8 @@ describe('SessionsService', () => {
       const dto = { tokenHash: 'hash', expiresAt: new Date(), ip: '127.0.0.1', userAgent: 'agent' };
       const session = { id: 'session-1', userId: 'user-1', ...dto };
       prisma.session.create.mockResolvedValue(session);
+      prisma.session.findMany.mockResolvedValue([{ id: 'session-1' }]);
+      prisma.session.deleteMany.mockResolvedValue({ count: 0 });
 
       const result = await service.create('user-1', dto);
 
@@ -163,6 +152,33 @@ describe('SessionsService', () => {
         },
       });
       expect(result).toEqual(session);
+    });
+
+    it(`signs out the least recently used sessions beyond ${MAX_ACTIVE_SESSIONS} devices`, async () => {
+      prisma.session.create.mockResolvedValue({ id: 'new' });
+      // Most recently used first, as requested from the database.
+      const active = ['new', 'b', 'c', 'oldest-1', 'oldest-2'].map((id) => ({ id }));
+      prisma.session.findMany.mockResolvedValue(active);
+      prisma.session.deleteMany.mockResolvedValue({ count: 2 });
+
+      await service.create('user-1', { expiresAt: new Date(Date.now() + 1000) });
+
+      expect(prisma.session.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] }),
+      );
+      const where = prisma.session.deleteMany.mock.calls[0][0].where;
+      expect(where.userId).toBe('user-1');
+      expect(where.OR[1]).toEqual({ id: { in: ['oldest-1', 'oldest-2'] } });
+    });
+
+    it('signs nobody out while within the limit', async () => {
+      prisma.session.create.mockResolvedValue({ id: 'new' });
+      prisma.session.findMany.mockResolvedValue([{ id: 'new' }, { id: 'b' }]);
+      prisma.session.deleteMany.mockResolvedValue({ count: 0 });
+
+      await service.create('user-1', { expiresAt: new Date(Date.now() + 1000) });
+
+      expect(prisma.session.deleteMany.mock.calls[0][0].where.OR[1]).toEqual({ id: { in: [] } });
     });
   });
 

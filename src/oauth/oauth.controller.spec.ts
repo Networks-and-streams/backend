@@ -66,6 +66,7 @@ describe('OauthController', () => {
       provider: OAuthProvider.GOOGLE,
       providerAccountId: 'google-123',
       email: 'user@gmail.com',
+      emailVerified: true,
       firstName: 'John',
       lastName: 'Doe',
       avatar: 'https://photo.jpg',

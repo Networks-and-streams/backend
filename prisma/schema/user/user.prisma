@@ -3,6 +3,9 @@ model User {
   email    String  @unique
   password String?
 
+  /// Set once the user proved they own `email` (link sent by email, or Google sign-in).
+  emailVerifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -10,4 +13,5 @@ model User {
   oauthAccounts OAuthAccount[]
   subscription  Subscription?
   payments      Payment[]
+  savedGraphs   SavedGraph[]
 }
