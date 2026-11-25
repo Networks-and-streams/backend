@@ -59,9 +59,51 @@ export interface FlowSnapshotJson {
   flow: number;
 }
 
+/** What a detailed flow trace frame shows (Ford–Fulkerson only). */
+export type FlowFrameKindJson = 'label' | 'reverse' | 'augment' | 'final';
+
+/** A vertex's mark at one point of the labeling stage (`null` = ∞). */
+export interface VertexMarkJson {
+  vertex: number;
+  mark: number | null;
+}
+
+/** One labeling action: vertex `to` gets its mark from vertex `from`. */
+export interface LabelComputationJson {
+  from: number;
+  to: number;
+  /** Mark of `from`; `null` = ∞. */
+  mark_from: number | null;
+  /** Residual capacity of the used arc (c − f forward, f backward). */
+  residual: number;
+  /** New mark of `to` = min(mark_from, residual). */
+  mark_to: number;
+  /** Position of the input edge whose residual arc was used. */
+  edge_index: number;
+  /** True when a backward residual arc was used. */
+  backward: boolean;
+}
+
 /** One animation frame of the flow execution trace. */
 export interface FlowStepJson {
+  /** 1-based frame number across the whole trace. */
   iteration: number;
+  /** 1-based stage — detailed Ford–Fulkerson trace only. */
+  stage?: number;
+  /** 1-based step inside its stage — detailed Ford–Fulkerson trace only. */
+  stage_step?: number;
+  /** What the frame shows — detailed Ford–Fulkerson trace only. */
+  kind?: FlowFrameKindJson;
+  /** Every mark at this moment (sorted by vertex) — detailed trace only. */
+  marks?: VertexMarkJson[];
+  /** Marked vertices (розмічені), ascending — detailed trace only. */
+  labeled?: number[];
+  /** Not yet marked vertices (нерозмічені), ascending — detailed trace only. */
+  unlabeled?: number[];
+  /** Labeling computation of a `label` frame — detailed trace only. */
+  computation?: LabelComputationJson;
+  /** Reverse chain so far, sink … source — detailed trace only. */
+  reverse_path?: number[];
   /** Vertices source … sink of this augmentation; empty on the final frame. */
   augmenting_path: number[];
   bottleneck: number;
